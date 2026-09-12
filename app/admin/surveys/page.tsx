@@ -10,7 +10,7 @@ import { can } from '@/lib/rbac';
 import type { AppSurvey, AppSurveyResponse, Student } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 
-const initialForm = { id: '', title: '', questionsText: '', is_active: true };
+const initialForm = { id: '', title: '', questions: [''], is_active: true };
 
 export default function AdminSurveysPage() {
   const { profile } = useSession();
@@ -33,18 +33,32 @@ export default function AdminSurveysPage() {
 
   const openNew = () => { setForm(initialForm); setDirty(false); setError(null); setOpen(true); };
   const openEdit = async (s: AppSurvey) => {
-    setForm({ id: s.id, title: s.title, questionsText: s.questions.join('\n'), is_active: s.is_active });
+    setForm({ id: s.id, title: s.title, questions: s.questions.length > 0 ? [...s.questions] : [''], is_active: s.is_active });
     setDirty(false); setError(null); setOpen(true);
     setSelected(s);
     try { setResponses(await fetchSurveyResponses(s.id)); } catch (err) { setError(err); }
   };
   const change = (patch: Partial<typeof form>) => { setForm((f) => ({ ...f, ...patch })); setDirty(true); };
+  const setQuestion = (i: number, v: string) => { setForm((f) => ({ ...f, questions: f.questions.map((q, idx) => idx === i ? v : q) })); setDirty(true); };
+  const addQuestion = () => { setForm((f) => ({ ...f, questions: [...f.questions, ''] })); setDirty(true); };
+  const removeQuestion = (i: number) => { setForm((f) => ({ ...f, questions: f.questions.length > 1 ? f.questions.filter((_, idx) => idx !== i) : [''] })); setDirty(true); };
+  const moveQuestion = (i: number, d: number) => {
+    setForm((f) => {
+      const qs = [...f.questions]; const j = i + d;
+      if (j < 0 || j >= qs.length) return f;
+      [qs[i], qs[j]] = [qs[j], qs[i]];
+      return { ...f, questions: qs };
+    });
+    setDirty(true);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); if (!centerId) return;
+    const clean = form.questions.map((x) => x.trim()).filter(Boolean);
+    if (clean.length === 0) { setError(new Error('أضف سؤالاً واحداً على الأقل')); return; }
     setBusy(true); setError(null);
     try {
-      await upsertSurvey(centerId, { id: form.id || undefined, title: form.title, questions: form.questionsText.split('\n').map((x) => x.trim()).filter(Boolean), is_active: form.is_active });
+      await upsertSurvey(centerId, { id: form.id || undefined, title: form.title, questions: clean, is_active: form.is_active });
       toast.success('تم حفظ الاستبيان', form.id ? 'تم تحديث الاستبيان.' : 'أصبح متاحاً للطلاب.');
       setDirty(false); setOpen(false); setForm(initialForm); setSelected(null); setResponses([]); await load();
     } catch (err) { setError(err); }
@@ -68,6 +82,7 @@ export default function AdminSurveysPage() {
     <Modal
       open={open}
       title={form.id ? 'تعديل استبيان' : 'استبيان جديد'}
+      subtitle="أضف أسئلتك واحداً واحداً مع إمكانية الترتيب"
       dirty={dirty}
       onClose={() => setOpen(false)}
       onSave={() => void submit({ preventDefault: () => {} } as React.FormEvent)}
@@ -75,8 +90,20 @@ export default function AdminSurveysPage() {
       footer={<Button disabled={busy} type="submit" form="survey-form">{busy ? 'جاري الحفظ...' : 'حفظ'}</Button>}
     >
       <form id="survey-form" className="stack" onSubmit={submit}>
-        <Input label="العنوان" value={form.title} onChange={(e) => change({ title: e.target.value })} required />
-        <label className="input-wrap"><span className="label">الأسئلة — كل سؤال في سطر</span><textarea className="textarea" value={form.questionsText} onChange={(e) => change({ questionsText: e.target.value })} required /></label>
+        <Input label="عنوان الاستبيان" value={form.title} onChange={(e) => change({ title: e.target.value })} required />
+        <div className="stack" style={{ gap: 8 }}>
+          {form.questions.map((q, i) => (
+            <div key={i} className="row" style={{ alignItems: 'end' }}>
+              <div style={{ flex: 1 }}>
+                <Input label={`سؤال ${i + 1}`} value={q} onChange={(e) => setQuestion(i, e.target.value)} placeholder="اكتب نص السؤال هنا" />
+              </div>
+              <Button type="button" variant="ghost" onClick={() => moveQuestion(i, -1)} disabled={i === 0} title="أعلى">↑</Button>
+              <Button type="button" variant="ghost" onClick={() => moveQuestion(i, 1)} disabled={i === form.questions.length - 1} title="أسفل">↓</Button>
+              <Button type="button" variant="ghost" onClick={() => removeQuestion(i)} title="حذف">✕</Button>
+            </div>
+          ))}
+          <Button type="button" variant="secondary" onClick={addQuestion}>+ إضافة سؤال</Button>
+        </div>
         <label className="row small muted"><input type="checkbox" checked={form.is_active} onChange={(e) => change({ is_active: e.target.checked })} /> نشط للطلاب</label>
         <ErrorNotice error={error} />
       </form>
