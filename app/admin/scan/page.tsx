@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { Button, Card, ErrorNotice, Input, Notice, PageHeader } from '@/components/ui';
+import { Modal } from '@/components/modal';
+import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
 import { fetchStudentById, markStudentPresentToday } from '@/lib/api';
 import { can } from '@/lib/rbac';
@@ -14,10 +16,12 @@ declare global { interface Window { BarcodeDetector?: BarcodeDetectorCtor } }
 
 export default function ScanPage() {
   const { profile } = useSession();
+  const toast = useToast();
   const [code, setCode] = useState('');
   const [running, setRunning] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const rafRef = useRef<number | null>(null);
@@ -34,7 +38,7 @@ export default function ScanPage() {
 
   const handleCode = async (raw: string) => {
     if (!profile?.center_id) return;
-    setError(null); setMessage(null);
+    setError(null);
     const decoded = decodeStudentQr(raw);
     if (!decoded) throw new Error('باركود غير صالح');
     if (decoded.centerId !== profile.center_id) throw new Error('هذا الباركود لا يخص سنترك');
@@ -42,17 +46,22 @@ export default function ScanPage() {
     const student = await fetchStudentById(decoded.studentId);
     if (!student) throw new Error('لم يتم العثور على الطالب');
     await markStudentPresentToday(profile.center_id, { id: student.id, group_id: student.group_id });
-    setMessage(`تم تسجيل حضور ${student.name} اليوم.`);
+    toast.success('تم تسجيل الحضور', `${student.name} حضر اليوم بنجاح.`);
     setCode('');
   };
 
   const submitManual = async (e: React.FormEvent) => {
     e.preventDefault();
-    try { await handleCode(code); } catch (err) { setError(err); }
+    try {
+      await handleCode(code);
+      setDirty(false); setOpen(false);
+    } catch (err) { setError(err); }
   };
 
+  const openManual = () => { setCode(''); setDirty(false); setError(null); setOpen(true); };
+
   const startCamera = async () => {
-    setError(null); setMessage(null);
+    setError(null);
     if (!window.BarcodeDetector) return setError(new Error('المتصفح الحالي لا يدعم BarcodeDetector. استخدم الإدخال اليدوي أو Chrome/Edge حديث.'));
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
@@ -83,11 +92,33 @@ export default function ScanPage() {
   useEffect(() => () => stopCamera(), []);
 
   return <>
-    <PageHeader title="ماسح QR للحضور" subtitle="مسح باركود الطالب اليومي من الويب أو إدخال النص يدوياً." />
-    <ErrorNotice error={error} />{message ? <Notice tone="success">{message}</Notice> : null}
-    <div className="grid grid-2">
-      <Card className="stack"><h2 className="h3">الكاميرا</h2><video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', borderRadius: 20, background: '#000', minHeight: 260 }} /> <div className="row"><Button type="button" disabled={running} onClick={startCamera}>تشغيل الكاميرا</Button><Button type="button" variant="secondary" onClick={stopCamera}>إيقاف</Button></div><Notice>لو لم تعمل الكاميرا بسبب دعم المتصفح، انسخ نص QR من حساب الطالب والصقه في الإدخال اليدوي.</Notice></Card>
-      <Card className="stack"><h2 className="h3">إدخال يدوي</h2><form className="stack" onSubmit={submitManual}><Input label="نص QR" value={code} onChange={(e) => setCode(e.target.value)} dir="ltr" placeholder="MRC1...." /><Button type="submit" disabled={!code.trim()}>تسجيل الحضور</Button></form></Card>
-    </div>
+    <PageHeader
+      title="ماسح QR للحضور"
+      subtitle="مسح باركود الطالب اليومي من الويب أو إدخال النص يدوياً."
+      actions={<Button type="button" variant="secondary" onClick={openManual}>+ إدخال يدوي</Button>}
+    />
+    <ErrorNotice error={error} />
+    <Card className="stack">
+      <h2 className="h3">الكاميرا</h2>
+      <video ref={videoRef} autoPlay playsInline muted style={{ width: '100%', borderRadius: 20, background: '#000', minHeight: 260 }} />
+      <div className="row"><Button type="button" disabled={running} onClick={startCamera}>تشغيل الكاميرا</Button><Button type="button" variant="secondary" onClick={stopCamera}>إيقاف</Button></div>
+      <Notice>لو لم تعمل الكاميرا بسبب دعم المتصفح، انسخ نص QR من حساب الطالب والصقه في الإدخال اليدوي عبر «+ إدخال يدوي».</Notice>
+    </Card>
+
+    <Modal
+      open={open}
+      title="إدخال يدوي"
+      subtitle="الصق نص QR الخاص بالطالب هنا"
+      dirty={dirty}
+      onClose={() => setOpen(false)}
+      onSave={() => void submitManual({ preventDefault: () => {} } as React.FormEvent)}
+      saveLabel="تسجيل الحضور"
+      footer={<Button disabled={!code.trim()} type="submit" form="manual-qr-form">تسجيل الحضور</Button>}
+    >
+      <form id="manual-qr-form" className="stack" onSubmit={submitManual}>
+        <Input label="نص QR" value={code} onChange={(e) => { setCode(e.target.value); setDirty(true); }} dir="ltr" placeholder="MRC1...." />
+        <ErrorNotice error={error} />
+      </form>
+    </Modal>
   </>;
 }
