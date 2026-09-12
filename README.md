@@ -175,9 +175,10 @@ supabase/android_multitenant_schema.sql
 الترحيلات التالية (تُشغَّل مرة واحدة بالترتيب في Supabase SQL Editor وهي idempotent):
 
 ```txt
-supabase/android_multitenant_schema.sql          # المخطط الأساسي الكامل
+supabase/android_multitenant_schema.sql          # المخطط الأساسي الكامل (شامل تكافؤ المحاسبة/الدعوات/المدير)
 supabase/20260912_fiscal_accounting.sql          # السنة المالية + المحاسبة + الاشتراكات + الزوار
 supabase/20260912_security.sql                   # السباقات + جلسة واحدة + منع الروبوتات
+supabase/20260912_parity_invites.sql             # (تكافؤ Android) بوابة المحاسبة الخادمية + دعوات الفريق + المدير الوحيد
 ```
 
 ---

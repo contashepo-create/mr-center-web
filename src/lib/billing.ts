@@ -35,8 +35,9 @@ export const PRODUCTS: PlanProduct[] = [
       { months: 12, label: 'سنوي', price: 6500 },
       { months: 24, label: 'سنتان', price: 12000 },
     ],
-    managers: 1, secretaries: 2, teachers: 4, maxStudents: null,
-    features: ['كل الصلاحيات', 'مدير + 2 سكرتير + 4 مدرسين', 'طلاب غير محدود', 'تقارير PDF', 'إشعارات وواتساب'],
+    // المدير هو صاحب السنتر دائماً — بلا مدير مضاف في أي باقة
+    managers: 0, secretaries: 2, teachers: 4, maxStudents: null,
+    features: ['كل الصلاحيات', 'سكرتير + 2 مدرسين', 'طلاب غير محدود', 'تقارير PDF', 'إشعارات وواتساب'],
   },
   {
     plan: 'center_medium',
@@ -47,8 +48,8 @@ export const PRODUCTS: PlanProduct[] = [
       { months: 12, label: 'سنوي', price: 4500 },
       { months: 24, label: 'سنتان', price: 8500 },
     ],
-    managers: 1, secretaries: 1, teachers: 2, maxStudents: null,
-    features: ['كل الصلاحيات', 'مدير + سكرتير + 2 مدرسين', 'طلاب غير محدود', 'تقارير PDF', 'إشعارات وواتساب'],
+    managers: 0, secretaries: 1, teachers: 2, maxStudents: null,
+    features: ['كل الصلاحيات', 'سكرتير + 2 مدرسين', 'طلاب غير محدود', 'تقارير PDF', 'إشعارات وواتساب'],
   },
   {
     plan: 'solo_teacher',
@@ -98,8 +99,8 @@ export function limitsFor(centerKind: string | null | undefined, plan: string | 
       teachers: product.teachers, maxStudents: product.maxStudents,
     };
   }
-  // التجريبية والقديمة والمخصصة: حدود الشاملة
-  return { managers: 1, secretaries: 2, teachers: 4, maxStudents: null };
+  // التجريبية والقديمة والمخصصة: حدود الشاملة (المدير هو صاحب السنتر دائماً)
+  return { managers: 0, secretaries: 2, teachers: 4, maxStudents: null };
 }
 
 /** سعر مدة معينة من منتج */

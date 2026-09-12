@@ -4,6 +4,18 @@
 
 export type Role = 'super_admin' | 'center_admin' | 'student' | 'teacher' | 'manager' | 'secretary';
 
+/** دعوة فريق عمل (سكرتير/مدرس) — كود يولّده صاحب السنتر */
+export interface StaffInviteRow {
+  id: string;
+  center_id: string;
+  code: string;
+  name: string;
+  phone: string | null;
+  role: 'teacher' | 'secretary';
+  status: 'pending' | 'accepted' | 'revoked';
+  created_at: string;
+}
+
 export interface SubscriptionRequest {
   id: string;
   center_id: string;

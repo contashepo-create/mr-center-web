@@ -88,14 +88,13 @@ export default function GroupsPage() {
         <Card className="stack">
           <h2 className="h3">{form.id ? 'تعديل مجموعة' : 'إضافة مجموعة'}</h2>
           <form className="stack" onSubmit={submit}>
+            <Notice tone="warn">المدرس يُعيَّن للمجموعة من شاشة «فريق العمل» (تفعيل الحساب + إسناد المجموعات) — لا يُختار من هنا.</Notice>
             <div className="grid grid-2">
               <Input label="اسم المجموعة" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
               <Select label="الصف" value={form.grade_id} onChange={(e) => setForm({ ...form, grade_id: e.target.value })}>
                 <option value="">بدون</option>
                 {grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
               </Select>
-              <Input label="اسم المدرس" value={form.teacher_name} onChange={(e) => setForm({ ...form, teacher_name: e.target.value })} />
-              <Input label="هاتف المدرس" value={form.teacher_phone} onChange={(e) => setForm({ ...form, teacher_phone: e.target.value })} dir="ltr" />
               <Input label="بداية الحصة" type="time" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} />
               <Input label="نهاية الحصة" type="time" value={form.end_time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} />
               <Select label="نظام الدفع" value={form.billing_type} onChange={(e) => setForm({ ...form, billing_type: e.target.value })}>

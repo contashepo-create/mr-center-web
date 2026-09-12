@@ -192,6 +192,97 @@ export async function registerStaffAccount(input: {
   if (error) throw error;
 }
 
+// ------------------------------------------------------------
+// دعوات فريق العمل (تطابق Android): سكرتير/مدرس فقط — المدير هو صاحب السنتر
+// ------------------------------------------------------------
+
+export interface StaffInviteRow {
+  id: string; center_id: string; code: string; name: string; phone: string | null;
+  role: 'teacher' | 'secretary'; status: 'pending' | 'accepted' | 'revoked'; created_at: string;
+}
+
+/** توليد كود دعوة (6 خانات بلا حروف ملتبسة) */
+export function generateInviteCode(): string {
+  const ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let out = '';
+  const rnd = new Uint32Array(6);
+  crypto.getRandomValues(rnd);
+  for (let i = 0; i < 6; i++) out += ABC[rnd[i] % ABC.length];
+  return out;
+}
+
+export async function createStaffInvite(input: {
+  centerId: string; name: string; phone: string; role: 'teacher' | 'secretary';
+}): Promise<string> {
+  const sb = getSupabase();
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const code = generateInviteCode();
+    const { error } = await sb.from('staff_invites').insert({
+      center_id: input.centerId, code, name: input.name.trim(),
+      phone: input.phone.trim() || null, role: input.role,
+      perms: {}, group_ids: [],
+    });
+    if (!error) return code;
+    if (!String((error as { message?: string }).message ?? '').includes('duplicate key')) throw error;
+  }
+  throw new Error('تعذر توليد كود فريد — حاول مجدداً');
+}
+
+export async function fetchStaffInvites(centerId: string): Promise<StaffInviteRow[]> {
+  const { data, error } = await getSupabase().from('staff_invites').select('*')
+    .eq('center_id', centerId).order('created_at', { ascending: false }).limit(100);
+  if (error) throw error;
+  return (data ?? []) as StaffInviteRow[];
+}
+
+export async function revokeStaffInvite(id: string): Promise<void> {
+  const { error } = await getSupabase().from('staff_invites')
+    .update({ status: 'revoked' }).eq('id', id);
+  if (error) throw error;
+}
+
+export async function getInviteInfo(code: string): Promise<{
+  found: boolean; suspended?: boolean; usable?: boolean;
+  center_id?: string; center_name?: string; role?: 'teacher' | 'secretary'; name?: string;
+}> {
+  const { data, error } = await getSupabase().rpc('get_invite_info', { p_code: code.trim().toUpperCase() });
+  if (error) throw error;
+  return (data ?? { found: false }) as {
+    found: boolean; suspended?: boolean; usable?: boolean;
+    center_id?: string; center_name?: string; role?: 'teacher' | 'secretary'; name?: string;
+  };
+}
+
+export async function acceptStaffInvite(code: string): Promise<void> {
+  const { error } = await getSupabase().rpc('accept_staff_invite', { p_code: code.trim().toUpperCase() });
+  if (error) throw error;
+}
+
+/** تسجيل موظف بدعوة — يرجع true إذا اكتمل الملف فوراً وfalse إذا علّق لتأكيد البريد */
+export async function registerStaffByInvite(input: {
+  inviteCode: string; email: string; password: string;
+}): Promise<boolean> {
+  const sb = getSupabase();
+  const email = input.email.trim().toLowerCase();
+  const { data, error } = await sb.auth.signUp({ email, password: input.password });
+  if (error) throw error;
+  if (!data.user) throw new Error('email_taken');
+  try {
+    await ensureSessionAfterSignUp(email, input.password);
+  } catch (e) {
+    if ((e as Error).message === 'email_confirmation_required') return false;
+    throw e;
+  }
+  try {
+    await acceptStaffInvite(input.inviteCode);
+  } catch (e) {
+    const m = String((e as any)?.message ?? '').toLowerCase();
+    if (m.includes('already_registered')) return true;
+    throw e;
+  }
+  return true;
+}
+
 /** سجل العمليات: من فعل ماذا (يستدعى بعد العمليات المهمة) */
 export async function logActivity(centerId: string, action: string, details: string): Promise<void> {
   try {

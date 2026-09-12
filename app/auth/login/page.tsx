@@ -6,7 +6,7 @@ import { Suspense, useState } from 'react';
 import { Button, ErrorNotice, Input, LinkButton, LoadingScreen, Notice } from '@/components/ui';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { useSession } from '@/context/session';
-import { completePendingCenter, completePendingStudent, loginWithEmail, registerStaffAccount, sendPasswordReset } from '@/lib/api';
+import { acceptStaffInvite, completePendingCenter, completePendingStudent, loginWithEmail, registerStaffAccount, sendPasswordReset } from '@/lib/api';
 import { clearPendingRegistration, loadPendingRegistration } from '@/lib/pendingRegistration';
 import { getSupabase } from '@/lib/supabase';
 import { isValidEmail } from '@/lib/utils';
@@ -110,12 +110,18 @@ function LoginForm() {
               groupId: pending.groupId ?? null,
             });
           } else {
-            await registerStaffAccount({
-              centerId: pending.centerId,
-              fullName: pending.fullName,
-              phone: pending.phone,
-              role: pending.staffRole ?? 'teacher',
-            });
+            // فريق: كود دعوة (سكرتير/مدرس) يحدد السنتر والدور — الحساب يبقى خاملاً حتى التفعيل
+            const inviteCode = (pending as { inviteCode?: string }).inviteCode ?? '';
+            if (inviteCode) {
+              await acceptStaffInvite(inviteCode);
+            } else {
+              await registerStaffAccount({
+                centerId: (pending as { centerId?: string }).centerId ?? '',
+                fullName: (pending as { fullName?: string }).fullName ?? '',
+                phone: (pending as { phone?: string }).phone ?? '',
+                role: (pending as { staffRole?: string }).staffRole ?? 'teacher',
+              });
+            }
           }
           await clearPendingRegistration();
           const retry = await getSupabase().from('profiles').select('role, is_active').eq('id', user.id).maybeSingle();

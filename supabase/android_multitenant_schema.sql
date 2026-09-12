@@ -308,23 +308,10 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
      );
 $$;
 
--- هل اشتراك السنتر ساري حالياً؟ (التاريخ خادمي — لا يتأثر بساعة جهاز العميل)
-CREATE OR REPLACE FUNCTION public.center_subscription_active(cid UUID)
-RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT EXISTS (
-    SELECT 1 FROM public.center_subscriptions
-    WHERE center_id = cid AND status = 'active'
-      AND (starts_on IS NULL OR starts_on <= CURRENT_DATE)
-      AND ends_on >= CURRENT_DATE
-  );
-$$;
-
--- هل سنتر معين فعّال للكتابة (غير موقوف + اشتراك ساري)؟
--- تُستخدم لمنع الكتابة عند الإيقاف أو انتهاء الاشتراك خادمياً
+-- هل سنتر معين فعّال (غير موقوف)؟ تُستخدم لمنع الكتابة عند الإيقاف
 CREATE OR REPLACE FUNCTION public.center_is_active(cid UUID)
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT EXISTS (SELECT 1 FROM public.centers WHERE id = cid AND status = 'active')
-     AND public.center_subscription_active(cid);
+  SELECT EXISTS (SELECT 1 FROM public.centers WHERE id = cid AND status = 'active');
 $$;
 
 -- صلاحية كاملة للأدوار الإدارية على صف معين: مطور أو موقع قديم أو مسئول نفس السنتر
@@ -1226,6 +1213,105 @@ $$;
 GRANT EXECUTE ON FUNCTION public.get_my_notifications() TO authenticated;
 
 -- ============================================================================
+-- دعوات فريق العمل: المالك ينشئ الدعوة (مدرس/سكرتير فقط — بلا مدير)،
+-- وصاحب الدعوة يقبلها بكودها فينشأ حسابه خاملاً حتى التفعيل.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.staff_invites (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id   UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  code        TEXT NOT NULL UNIQUE,
+  name        TEXT NOT NULL DEFAULT '',
+  phone       TEXT,
+  role        TEXT NOT NULL DEFAULT 'teacher' CHECK (role IN ('teacher','secretary')),
+  perms       JSONB NOT NULL DEFAULT '{}',
+  group_ids   JSONB NOT NULL DEFAULT '[]',
+  status      TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','revoked')),
+  accepted_by UUID,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_invites_center ON public.staff_invites(center_id);
+CREATE INDEX IF NOT EXISTS idx_staff_invites_code ON public.staff_invites(code);
+
+ALTER TABLE public.staff_invites ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "staff_invites_owner_all" ON public.staff_invites;
+CREATE POLICY "staff_invites_owner_all" ON public.staff_invites FOR ALL TO authenticated
+  USING (public.my_role() = 'center_admin' AND center_id = public.my_center_id())
+  WITH CHECK (public.my_role() = 'center_admin' AND center_id = public.my_center_id()
+              AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS "staff_invites_super_admin" ON public.staff_invites;
+CREATE POLICY "staff_invites_super_admin" ON public.staff_invites FOR ALL TO authenticated
+  USING (public.my_role() = 'super_admin') WITH CHECK (public.my_role() = 'super_admin');
+DROP POLICY IF EXISTS "staff_invites_legacy" ON public.staff_invites;
+CREATE POLICY "staff_invites_legacy" ON public.staff_invites FOR ALL TO authenticated
+  USING (public.is_legacy_admin()) WITH CHECK (public.is_legacy_admin());
+
+-- بيانات دعوة للعرض قبل التسجيل (اسم السنتر والصفة فقط — بلا بيانات حساسة)
+CREATE OR REPLACE FUNCTION public.get_invite_info(p_code TEXT)
+RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_inv public.staff_invites%ROWTYPE;
+  v_center TEXT;
+  v_status TEXT;
+BEGIN
+  SELECT * INTO v_inv FROM public.staff_invites
+   WHERE upper(code) = upper(trim(p_code)) LIMIT 1;
+  IF v_inv.id IS NULL THEN RETURN jsonb_build_object('found', false); END IF;
+  SELECT name, status INTO v_center, v_status FROM public.centers WHERE id = v_inv.center_id;
+  IF v_status IS DISTINCT FROM 'active' THEN
+    RETURN jsonb_build_object('found', true, 'suspended', true);
+  END IF;
+  RETURN jsonb_build_object(
+    'found', true, 'center_id', v_inv.center_id, 'center_name', v_center,
+    'role', v_inv.role, 'name', v_inv.name,
+    'usable', (v_inv.status = 'pending')
+  );
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.get_invite_info(TEXT) TO anon, authenticated;
+
+-- قبول الدعوة: ينشئ حساب الفريق خاملاً ويربط مجموعاته ويغلق الدعوة
+CREATE OR REPLACE FUNCTION public.accept_staff_invite(p_code TEXT)
+RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_uid UUID := auth.uid();
+  v_email TEXT;
+  v_inv public.staff_invites%ROWTYPE;
+  v_status TEXT;
+  g TEXT;
+BEGIN
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_uid) THEN
+    RAISE EXCEPTION 'already_registered';
+  END IF;
+  SELECT * INTO v_inv FROM public.staff_invites
+   WHERE upper(code) = upper(trim(p_code)) LIMIT 1;
+  IF v_inv.id IS NULL THEN RAISE EXCEPTION 'invalid_invite'; END IF;
+  IF v_inv.status <> 'pending' THEN RAISE EXCEPTION 'invite_used'; END IF;
+  SELECT status INTO v_status FROM public.centers WHERE id = v_inv.center_id;
+  IF v_status IS NULL THEN RAISE EXCEPTION 'center_not_found'; END IF;
+  IF v_status <> 'active' THEN RAISE EXCEPTION 'center_suspended'; END IF;
+  SELECT email INTO v_email FROM auth.users WHERE id = v_uid;
+  BEGIN
+    INSERT INTO public.profiles (id, role, center_id, full_name, email, phone, is_active, perms)
+    VALUES (v_uid, v_inv.role, v_inv.center_id, nullif(trim(v_inv.name), ''), v_email,
+            nullif(trim(COALESCE(v_inv.phone, '')), ''), false, COALESCE(v_inv.perms, '{}'));
+  EXCEPTION WHEN unique_violation THEN
+    RAISE EXCEPTION 'phone_taken';
+  END;
+  FOR g IN SELECT jsonb_array_elements_text(COALESCE(v_inv.group_ids, '[]'::jsonb)) LOOP
+    INSERT INTO public.teacher_groups (teacher_id, group_id, center_id)
+    SELECT v_uid::text, g, v_inv.center_id
+    WHERE EXISTS (SELECT 1 FROM public.groups WHERE id = g AND center_id = v_inv.center_id)
+    ON CONFLICT DO NOTHING;
+  END LOOP;
+  UPDATE public.staff_invites SET status = 'accepted', accepted_by = v_uid WHERE id = v_inv.id;
+  RETURN v_uid;
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.accept_staff_invite(TEXT) TO authenticated;
+
+-- ============================================================================
 -- ٦/هـ) قناة الدعم: رسائل ثنائية بين مالك السنتر والمطور
 -- (المالك يقرأ ويرسل لسنتره فقط — المطور يرى الكل ويرد)
 -- ============================================================================
@@ -1246,7 +1332,8 @@ CREATE POLICY "support_owner_read" ON public.support_messages FOR SELECT TO auth
 DROP POLICY IF EXISTS "support_owner_insert" ON public.support_messages;
 CREATE POLICY "support_owner_insert" ON public.support_messages FOR INSERT TO authenticated
   WITH CHECK (public.admin_owns_center(center_id)
-              AND sender_role = 'owner');
+              AND sender_role = 'owner'
+              AND public.center_is_active(center_id));
 DROP POLICY IF EXISTS "support_super_admin" ON public.support_messages;
 CREATE POLICY "support_super_admin" ON public.support_messages FOR ALL TO authenticated
   USING (public.my_role() = 'super_admin')
@@ -1293,7 +1380,7 @@ DROP POLICY IF EXISTS "subreq_owner_all" ON public.subscription_requests;
 CREATE POLICY "subreq_owner_all" ON public.subscription_requests FOR ALL TO authenticated
   USING (public.my_role() = 'center_admin' AND center_id = public.my_center_id())
   WITH CHECK (public.my_role() = 'center_admin' AND center_id = public.my_center_id()
-              AND status = 'pending');
+              AND public.center_is_active(center_id) AND status = 'pending');
 DROP POLICY IF EXISTS "subreq_super_admin" ON public.subscription_requests;
 CREATE POLICY "subreq_super_admin" ON public.subscription_requests FOR ALL TO authenticated
   USING (public.my_role() = 'super_admin') WITH CHECK (public.my_role() = 'super_admin');
@@ -1343,7 +1430,8 @@ BEGIN
   SELECT plan_type INTO v_plan FROM public.center_subscriptions
    WHERE center_id = NEW.center_id ORDER BY ends_on DESC LIMIT 1;
   IF NEW.role = 'manager' THEN
-    IF v_kind = 'solo' THEN v_max := 0; ELSE v_max := 1; END IF;
+    -- لا مدير إضافي أبداً: المالك هو المدير الوحيد
+    v_max := 0;
   ELSIF NEW.role = 'secretary' THEN
     IF v_kind = 'solo' THEN v_max := 0;
     ELSIF v_plan = 'center_medium' THEN v_max := 1;
@@ -1390,8 +1478,7 @@ ALTER TABLE public.profiles ADD COLUMN IF NOT EXISTS perms JSONB NOT NULL DEFAUL
 
 CREATE OR REPLACE FUNCTION public.teacher_center_ok(cid UUID)
 RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT public.teacher_is_active() AND cid IS NOT NULL AND cid = public.my_center_id()
-     AND public.center_subscription_active(cid);
+  SELECT public.teacher_is_active() AND cid IS NOT NULL AND cid = public.my_center_id();
 $$;
 
 -- انضمام الطالب لمجموعات إضافية (بجانب مجموعته الأساسية group_id)
@@ -1678,7 +1765,7 @@ BEGIN
  INTO ext FROM public.center_entitlements
  WHERE center_id=NEW.center_id AND feature_key='staff_expansion'
    AND starts_on <= CURRENT_DATE AND (is_open_ended OR ends_on >= CURRENT_DATE);
- IF NEW.role='manager' THEN lim=CASE WHEN k='solo' THEN 0 ELSE 1 END;
+ IF NEW.role='manager' THEN lim=0; -- صاحب السنتر هو المدير الوحيد — زيادة المديرين من المطور فقط
  ELSIF NEW.role='secretary' THEN lim=CASE WHEN k='solo' THEN 0 WHEN p='center_medium' THEN 1 ELSE 2 END;
  ELSE lim=CASE WHEN k='solo' THEN 0 WHEN p='center_medium' THEN 2 ELSE 4 END; END IF;
  SELECT count(*) INTO used FROM public.profiles WHERE center_id=NEW.center_id AND role=NEW.role AND is_active AND id IS DISTINCT FROM NEW.id;
@@ -1790,557 +1877,196 @@ BEGIN
  RETURN ROUND(total*rate/100,2);
 END; $$;
 GRANT EXECUTE ON FUNCTION public.calculate_staff_commission(UUID,DATE,DATE) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.calculate_staff_commission(UUID,DATE,DATE) TO authenticated;
+
 -- ============================================================================
---  Mr Center — السنة المالية + بوابة المحاسبة المدفوعة
---  التاريخ: 2026-09-12
---  شغّل هذا الملف بعد android_multitenant_schema.sql و 20260911_safe_production_migration.sql
---  الملف idempotent: يمكن إعادة تشغيله بأمان (IF NOT EXISTS / OR REPLACE).
---  لا يحتوي على service_role أو أي مفتاح سري.
---
---  ماذا يضيف:
---   ١) center_fiscal_years: فتح/إغلاق السنة المالية لكل سنتر + ترحيل الرصيد الافتتاحي.
---   ٢) بوابة المحاسبة كخدمة مدفوعة يفعّلها المطور لكل سنتر على حدة:
---      - الإيرادات تُسجل تلقائياً في الخلفية دائماً (trigger قائم في مخطط سابق).
---      - العهدة تُعتمد تلقائياً كأنها سليمة عندما تكون الخدمة غير مفعلة.
---      - قسم المصروفات/المحاسبة لا يظهر لصاحب السنتر غير المشترك إلا بعد التفعيل،
---        وعند التفعيل لاحقاً يجد كل الحسابات جاهزة من بداية اشتراكه.
+-- ١٠) المحاسبة كخدمة مدفوعة: تفعيل لكل سنتر من لوحة المطور + السنوات المالية
+--     - دون التفعيل: الإيرادات تُسجل بالخلفية آلياً (trigger بأمان تعريف)
+--       ويراها المطور فقط؛ المالك لا يرى دفتر الحسابات ولا يدخل فيه.
+--     - عند التفعيل لاحقاً: يجد المالك سجل التحصيل كاملاً منذ بداية اشتراكه.
 -- ============================================================================
 
-BEGIN;
+-- هل المحاسبة مفعّلة لهذا السنتر؟ (المطور دائماً · اشتراك فعّال بميزة accounting · صلاحية مؤقتة)
+CREATE OR REPLACE FUNCTION public.accounting_enabled(p_center UUID)
+RETURNS BOOLEAN LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_uid UUID := auth.uid();
+  v_role TEXT;
+  v_feat BOOLEAN := false;
+BEGIN
+  IF v_uid IS NULL THEN RETURN false; END IF;
+  SELECT role INTO v_role FROM public.profiles WHERE id = v_uid;
+  IF v_role = 'super_admin' THEN RETURN true; END IF;
+  SELECT COALESCE((s.enabled_features ->> 'accounting')::boolean, false) INTO v_feat
+    FROM public.center_subscriptions s
+   WHERE s.center_id = p_center AND s.status = 'active'
+     AND (s.starts_on IS NULL OR s.starts_on <= CURRENT_DATE)
+     AND (s.ends_on IS NULL OR s.ends_on >= CURRENT_DATE)
+   ORDER BY s.ends_on DESC NULLS LAST LIMIT 1;
+  IF v_feat THEN RETURN true; END IF;
+  RETURN EXISTS (
+    SELECT 1 FROM public.center_entitlements e
+     WHERE e.center_id = p_center AND e.feature_key = 'accounting'
+       AND e.starts_on <= CURRENT_DATE
+       AND (e.is_open_ended OR e.ends_on >= CURRENT_DATE));
+END; $$;
+GRANT EXECUTE ON FUNCTION public.accounting_enabled(UUID) TO authenticated;
 
--- ----------------------------------------------------------------------------
--- ١) جدول السنوات المالية
--- ----------------------------------------------------------------------------
+-- مالك السنتر لا يلمس الدفتر إلا إذا كانت الخدمة مفعّلة له (خادمياً)
+DROP POLICY IF EXISTS ledger_owner_all ON public.center_ledger;
+CREATE POLICY ledger_owner_all ON public.center_ledger FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id) AND public.accounting_enabled(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.accounting_enabled(center_id));
+
+  WITH CHECK (public.admin_owns_center(center_id) AND public.accounting_enabled(center_id));
+
+-- السنوات المالية: فتح/إغلاق مع ترحيل الرصيد
 CREATE TABLE IF NOT EXISTS public.center_fiscal_years (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  center_id uuid NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
-  year_label text NOT NULL,
-  starts_on date NOT NULL,
-  ends_on date,
-  status text NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
-  opening_balance numeric(12,2) NOT NULL DEFAULT 0,
-  opening_pending_dues numeric(12,2) NOT NULL DEFAULT 0,
-  closing_income numeric(12,2),
-  closing_expense numeric(12,2),
-  closing_balance numeric(12,2),
-  closing_pending_dues numeric(12,2),
-  opened_at timestamptz NOT NULL DEFAULT now(),
-  closed_at timestamptz,
-  UNIQUE(center_id, year_label)
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  year INT NOT NULL CHECK (year BETWEEN 2000 AND 2100),
+  status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
+  opening_balance NUMERIC(12,2) NOT NULL DEFAULT 0,
+  closing_balance NUMERIC(12,2),
+  opened_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  closed_at TIMESTAMPTZ,
+  closed_by UUID REFERENCES auth.users(id),
+  UNIQUE (center_id, year)
 );
-CREATE INDEX IF NOT EXISTS idx_fiscal_years_center ON public.center_fiscal_years(center_id, starts_on DESC);
-CREATE UNIQUE INDEX IF NOT EXISTS uq_fiscal_year_open ON public.center_fiscal_years(center_id) WHERE status = 'open';
-
+CREATE INDEX IF NOT EXISTS idx_fiscal_center_year ON public.center_fiscal_years(center_id, year DESC);
 ALTER TABLE public.center_fiscal_years ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS fiscal_owner_all ON public.center_fiscal_years;
 CREATE POLICY fiscal_owner_all ON public.center_fiscal_years FOR ALL TO authenticated
-  USING (public.admin_owns_center(center_id)) WITH CHECK (public.admin_owns_center(center_id));
-DROP POLICY IF EXISTS fiscal_developer_all ON public.center_fiscal_years;
-CREATE POLICY fiscal_developer_all ON public.center_fiscal_years FOR ALL TO authenticated
-  USING (public.my_role() = 'super_admin') WITH CHECK (public.my_role() = 'super_admin');
+  USING (public.admin_owns_center(center_id) AND public.accounting_enabled(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.accounting_enabled(center_id));
+DROP POLICY IF EXISTS fiscal_dev_all ON public.center_fiscal_years;
+CREATE POLICY fiscal_dev_all ON public.center_fiscal_years FOR ALL TO authenticated
+  USING ((SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid()))
+  WITH CHECK ((SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid()));
 
--- ----------------------------------------------------------------------------
--- ٢) توابع السنة الدراسية (سبتمبر → أغسطس)
--- ----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.academic_year_start(p_date timestamptz DEFAULT now())
-RETURNS DATE LANGUAGE sql STABLE AS $$
-  SELECT make_date(
-    (EXTRACT(YEAR FROM p_date)::int) - CASE WHEN EXTRACT(MONTH FROM p_date)::int < 9 THEN 1 ELSE 0 END,
-    9, 1);
-$$;
-
-CREATE OR REPLACE FUNCTION public.academic_year_label(p_date timestamptz DEFAULT now())
-RETURNS TEXT LANGUAGE sql STABLE AS $$
-  SELECT
-    ((EXTRACT(YEAR FROM p_date)::int) - CASE WHEN EXTRACT(MONTH FROM p_date)::int < 9 THEN 1 ELSE 0 END)::text
-    || '/' ||
-    ((EXTRACT(YEAR FROM p_date)::int) - CASE WHEN EXTRACT(MONTH FROM p_date)::int < 9 THEN 1 ELSE 0 END + 1)::text;
-$$;
-
--- فتح سنة مالية تلقائياً إن لم توجد سنة مفتوحة (دالة داخلية — لا تُمنح للعموم)
-CREATE OR REPLACE FUNCTION public.ensure_open_fiscal_year(p_center UUID)
-RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE v_id UUID; v_start DATE := public.academic_year_start(now());
-BEGIN
-  SELECT id INTO v_id FROM public.center_fiscal_years WHERE center_id = p_center AND status = 'open' LIMIT 1;
-  IF v_id IS NULL THEN
-    INSERT INTO public.center_fiscal_years(center_id, year_label, starts_on, ends_on, status)
-    VALUES(p_center, public.academic_year_label(now()), v_start, v_start + interval '1 year' - interval '1 day', 'open')
-    ON CONFLICT (center_id, year_label) DO NOTHING
-    RETURNING id INTO v_id;
-    IF v_id IS NULL THEN
-      SELECT id INTO v_id FROM public.center_fiscal_years WHERE center_id = p_center AND status = 'open' LIMIT 1;
-    END IF;
-  END IF;
-  RETURN v_id;
-END; $$;
-REVOKE ALL ON FUNCTION public.ensure_open_fiscal_year(UUID) FROM PUBLIC;
-
--- كل سنتر جديد يبدأ بسنة مالية مفتوحة تلقائياً
-CREATE OR REPLACE FUNCTION public.trg_center_fiscal_year()
-RETURNS TRIGGER LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-BEGIN
-  PERFORM public.ensure_open_fiscal_year(NEW.id);
-  RETURN NEW;
-END; $$;
-DROP TRIGGER IF EXISTS trg_center_fiscal_year ON public.centers;
-CREATE TRIGGER trg_center_fiscal_year AFTER INSERT ON public.centers FOR EACH ROW EXECUTE FUNCTION public.trg_center_fiscal_year();
-
--- ترحيل خلفي: السناتر القائمة بلا سنة مالية تحصل على سنة مفتوحة حالياً
-INSERT INTO public.center_fiscal_years(center_id, year_label, starts_on, ends_on, status)
-SELECT c.id, public.academic_year_label(now()), public.academic_year_start(now()),
-       public.academic_year_start(now()) + interval '1 year' - interval '1 day', 'open'
-FROM public.centers c
-WHERE NOT EXISTS (SELECT 1 FROM public.center_fiscal_years y WHERE y.center_id = c.id)
-ON CONFLICT (center_id, year_label) DO NOTHING;
-
--- ----------------------------------------------------------------------------
--- ٣) بوابة المحاسبة كخدمة مدفوعة (تُدار من لوحة المطور لكل سنتر)
--- ----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.center_accounting_enabled(p_center UUID)
-RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT
-    COALESCE((
-      SELECT (enabled_features ->> 'accounting')::boolean
-      FROM public.center_subscriptions
-      WHERE center_id = p_center AND status = 'active'
-      ORDER BY ends_on DESC NULLS LAST LIMIT 1
-    ), false)
-    OR EXISTS (
-      SELECT 1 FROM public.center_entitlements
-      WHERE center_id = p_center AND feature_key = 'accounting'
-        AND starts_on <= CURRENT_DATE AND (is_open_ended OR ends_on >= CURRENT_DATE)
-    );
-$$;
-REVOKE ALL ON FUNCTION public.center_accounting_enabled(UUID) FROM PUBLIC;
-
--- مزايا المستخدم الحالي (تقول للويب هل المحاسبة ظاهرة أم تعمل في الخلفية فقط)
-CREATE OR REPLACE FUNCTION public.get_my_features()
-RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
-DECLARE v_role TEXT; v_center UUID;
-BEGIN
-  SELECT role, center_id INTO v_role, v_center FROM public.profiles WHERE id = auth.uid();
-  IF v_role = 'super_admin' THEN RETURN jsonb_build_object('accounting', true); END IF;
-  IF v_center IS NULL THEN RETURN jsonb_build_object('accounting', false); END IF;
-  RETURN jsonb_build_object('accounting', public.center_accounting_enabled(v_center));
-END; $$;
-GRANT EXECUTE ON FUNCTION public.get_my_features() TO authenticated;
-
--- تفعيل/إيقاف المحاسبة لسنتر محدد (المطور فقط)
-CREATE OR REPLACE FUNCTION public.dev_set_accounting(p_center UUID, p_enabled BOOLEAN)
+-- فتح سنة مالية: رصيد أول المدة = رصيد إغلاق آخر سنة مغلقة قبله
+CREATE OR REPLACE FUNCTION public.open_fiscal_year(p_year INT)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-BEGIN
-  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) IS DISTINCT FROM 'super_admin' THEN
-    RAISE EXCEPTION 'not_allowed';
-  END IF;
-  IF p_enabled THEN
-    INSERT INTO public.center_entitlements(center_id, extra_teachers, extra_secretaries, extra_managers, feature_key, starts_on, ends_on, is_open_ended, created_by)
-    VALUES(p_center, 0, 0, 0, 'accounting', CURRENT_DATE, NULL, true, auth.uid())
-    ON CONFLICT (center_id, feature_key) DO UPDATE
-      SET starts_on = EXCLUDED.starts_on, ends_on = NULL, is_open_ended = true, created_by = auth.uid();
-    UPDATE public.center_subscriptions SET enabled_features = enabled_features || '{"accounting": true}'::jsonb
-    WHERE center_id = p_center AND status = 'active';
-  ELSE
-    DELETE FROM public.center_entitlements WHERE center_id = p_center AND feature_key = 'accounting';
-    UPDATE public.center_subscriptions SET enabled_features = enabled_features - 'accounting'
-    WHERE center_id = p_center AND status = 'active';
-  END IF;
-END; $$;
-GRANT EXECUTE ON FUNCTION public.dev_set_accounting(UUID, BOOLEAN) TO authenticated;
-
--- ----------------------------------------------------------------------------
--- ٤) سنوات المستخدم الحالي + إغلاق سنة وفتح سنة جديدة مع الترحيل
--- ----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.get_my_fiscal_years()
-RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
-DECLARE v_role TEXT; v_center UUID; v_result JSONB;
-BEGIN
-  SELECT role, center_id INTO v_role, v_center FROM public.profiles WHERE id = auth.uid();
-  IF v_role NOT IN ('center_admin','super_admin') OR v_center IS NULL THEN RETURN '[]'::jsonb; END IF;
-  SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.starts_on DESC), '[]'::jsonb) INTO v_result
-  FROM (
-    SELECT id, center_id, year_label, starts_on, ends_on, status,
-           opening_balance, opening_pending_dues, closing_income, closing_expense,
-           closing_balance, closing_pending_dues, opened_at, closed_at
-    FROM public.center_fiscal_years WHERE center_id = v_center
-  ) t;
-  RETURN v_result;
-END; $$;
-GRANT EXECUTE ON FUNCTION public.get_my_fiscal_years() TO authenticated;
-
--- سنوات سنتر محدد (المطور فقط — للمراجعة من لوحة المطور)
-CREATE OR REPLACE FUNCTION public.get_center_fiscal_years(p_center UUID)
-RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
-DECLARE v_result JSONB;
-BEGIN
-  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) IS DISTINCT FROM 'super_admin' THEN
-    RAISE EXCEPTION 'not_allowed';
-  END IF;
-  SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.starts_on DESC), '[]'::jsonb) INTO v_result
-  FROM (
-    SELECT id, center_id, year_label, starts_on, ends_on, status,
-           opening_balance, opening_pending_dues, closing_income, closing_expense,
-           closing_balance, closing_pending_dues, opened_at, closed_at
-    FROM public.center_fiscal_years WHERE center_id = p_center
-  ) t;
-  RETURN v_result;
-END; $$;
-GRANT EXECUTE ON FUNCTION public.get_center_fiscal_years(UUID) TO authenticated;
-
--- إغلاق السنة المالية الحالية وفتح السنة التالية مع ترحيل الرصيد الافتتاحي
--- والمستحقات المعلقة. تُحسب الإيرادات/المصروفات من دفتر الحسابات داخل نطاق السنة.
-CREATE OR REPLACE FUNCTION public.close_fiscal_year(p_center UUID)
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
-  v_year public.center_fiscal_years%ROWTYPE;
-  v_income numeric(12,2) := 0;
-  v_expense numeric(12,2) := 0;
-  v_balance numeric(12,2) := 0;
-  v_pending numeric(12,2) := 0;
-  v_label TEXT;
-  v_next_start DATE;
-  v_next_end DATE;
+  cid UUID;
 BEGIN
-  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) IS DISTINCT FROM 'super_admin'
-     AND (SELECT role FROM public.profiles WHERE id = auth.uid()) IS DISTINCT FROM 'center_admin' THEN
-    RAISE EXCEPTION 'not_allowed';
+  SELECT center_id INTO cid FROM public.profiles
+   WHERE id = auth.uid()
+     AND (role = 'super_admin'
+          OR (role = 'center_admin' AND public.accounting_enabled(center_id)));
+  IF cid IS NULL THEN RAISE EXCEPTION 'not_allowed'; END IF;
+  IF EXISTS (SELECT 1 FROM public.center_fiscal_years WHERE center_id = cid AND year = p_year) THEN
+    RAISE EXCEPTION 'year_exists';
   END IF;
-  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) = 'center_admin'
-     AND (SELECT center_id FROM public.profiles WHERE id = auth.uid()) IS DISTINCT FROM p_center THEN
-    RAISE EXCEPTION 'not_allowed';
-  END IF;
+  INSERT INTO public.center_fiscal_years(center_id, year, status, opening_balance)
+  VALUES (cid, p_year, 'open',
+    COALESCE((SELECT closing_balance FROM public.center_fiscal_years
+               WHERE center_id = cid AND status = 'closed' AND year < p_year
+               ORDER BY year DESC LIMIT 1), 0));
+END; $$;
+GRANT EXECUTE ON FUNCTION public.open_fiscal_year(INT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.open_fiscal_year(INT) TO authenticated;
 
-  SELECT * INTO v_year FROM public.center_fiscal_years
-   WHERE center_id = p_center AND status = 'open' LIMIT 1;
-  IF v_year.id IS NULL THEN
-    PERFORM public.ensure_open_fiscal_year(p_center);
-    SELECT * INTO v_year FROM public.center_fiscal_years
-     WHERE center_id = p_center AND status = 'open' LIMIT 1;
-  END IF;
-
-  v_year.ends_on := COALESCE(v_year.ends_on, CURRENT_DATE);
-
-  SELECT COALESCE(SUM(amount), 0) INTO v_income FROM public.center_ledger
-   WHERE center_id = p_center AND kind = 'income' AND occurred_on BETWEEN v_year.starts_on AND v_year.ends_on;
-  SELECT COALESCE(SUM(amount), 0) INTO v_expense FROM public.center_ledger
-   WHERE center_id = p_center AND kind = 'expense' AND occurred_on BETWEEN v_year.starts_on AND v_year.ends_on;
-  v_balance := v_year.opening_balance + v_income - v_expense;
-  SELECT COALESCE(SUM(amount), 0) INTO v_pending FROM public.dues
-   WHERE center_id = p_center AND status IN ('pending','partial')
-     AND make_date(year, month, 1) BETWEEN v_year.starts_on AND v_year.ends_on;
-
+-- إغلاق سنة: حساب الصافي + فتح السنة التالية بترحيل الرصيد تلقائياً
+CREATE OR REPLACE FUNCTION public.close_fiscal_year(p_year INT)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  cid UUID;
+  v_net NUMERIC;
+  v_row public.center_fiscal_years%ROWTYPE;
+BEGIN
+  SELECT center_id INTO cid FROM public.profiles
+   WHERE id = auth.uid()
+     AND (role = 'super_admin'
+          OR (role = 'center_admin' AND public.accounting_enabled(center_id)));
+  IF cid IS NULL THEN RAISE EXCEPTION 'not_allowed'; END IF;
+  SELECT * INTO v_row FROM public.center_fiscal_years WHERE center_id = cid AND year = p_year;
+  IF NOT FOUND THEN RAISE EXCEPTION 'year_not_found'; END IF;
+  IF v_row.status <> 'open' THEN RAISE EXCEPTION 'year_closed'; END IF;
+  SELECT COALESCE(SUM(CASE kind WHEN 'income' THEN amount ELSE -amount END), 0) INTO v_net
+    FROM public.center_ledger
+   WHERE center_id = cid
+     AND COALESCE(period_year, EXTRACT(YEAR FROM occurred_on)::int) = p_year;
   UPDATE public.center_fiscal_years
-   SET status = 'closed', ends_on = v_year.ends_on,
-       closing_income = v_income, closing_expense = v_expense,
-       closing_balance = v_balance, closing_pending_dues = v_pending,
-       closed_at = now()
-   WHERE id = v_year.id;
+     SET status = 'closed', closing_balance = v_net, closed_at = now(), closed_by = auth.uid()
+   WHERE id = v_row.id;
+  -- السنة التالية تُفتح تلقائياً برصيد مرحّل (وإن كانت موجودة يُحدَّث رصيد أول المدة)
+  INSERT INTO public.center_fiscal_years(center_id, year, status, opening_balance)
+  VALUES (cid, p_year + 1, 'open', v_net)
+  ON CONFLICT (center_id, year) DO UPDATE SET opening_balance = EXCLUDED.opening_balance;
+END; $$;
+GRANT EXECUTE ON FUNCTION public.close_fiscal_year(INT) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.close_fiscal_year(INT) TO authenticated;
 
-  v_next_start := v_year.ends_on + 1;
-  v_next_end := v_next_start + interval '1 year' - interval '1 day';
-  v_label := (EXTRACT(YEAR FROM v_next_start)::int)::text || '/' || (EXTRACT(YEAR FROM v_next_end)::int)::text;
+-- ============================================================================
+-- ١١) دعوات فريق العمل: صاحب السنتر يولّد كود دعوة (سكرتير/مدرس فقط —
+--     المدير لا يُدعى إطلاقاً؛ صاحب السنتر هو المدير) والموظف يسجل بالكود.
+-- ============================================================================
+CREATE TABLE IF NOT EXISTS public.staff_invites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  center_id UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
+  code TEXT NOT NULL UNIQUE,
+  name TEXT NOT NULL,
+  phone TEXT,
+  role TEXT NOT NULL CHECK (role IN ('teacher','secretary')),
+  perms JSONB NOT NULL DEFAULT '{}'::jsonb,
+  group_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','revoked')),
+  created_by UUID REFERENCES auth.users(id),
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_staff_invites_center ON public.staff_invites(center_id, created_at DESC);
+ALTER TABLE public.staff_invites ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS invites_owner_all ON public.staff_invites;
+CREATE POLICY invites_owner_all ON public.staff_invites FOR ALL TO authenticated
+  USING (public.admin_owns_center(center_id))
+  WITH CHECK (public.admin_owns_center(center_id) AND public.center_is_active(center_id));
+DROP POLICY IF EXISTS invites_dev_all ON public.staff_invites;
+CREATE POLICY invites_dev_all ON public.staff_invites FOR ALL TO authenticated
+  USING ((SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid()))
+  WITH CHECK ((SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid()));
 
-  INSERT INTO public.center_fiscal_years(center_id, year_label, starts_on, ends_on, status, opening_balance, opening_pending_dues)
-  VALUES(p_center, v_label, v_next_start, v_next_end, 'open', v_balance, v_pending)
-  ON CONFLICT (center_id, year_label) DO NOTHING;
-
+-- معاينة كود الدعوة (قبل التسجيل — للموظف والزائر)
+CREATE OR REPLACE FUNCTION public.get_invite_info(p_code TEXT)
+RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
+DECLARE v RECORD;
+BEGIN
+  SELECT i.role AS invite_role, i.name AS invite_name, c.id AS center_id,
+         c.name AS center_name, c.status AS center_status, i.status AS invite_status
+    INTO v FROM public.staff_invites i JOIN public.centers c ON c.id = i.center_id
+   WHERE i.code = upper(trim(p_code));
+  IF NOT FOUND THEN RETURN jsonb_build_object('found', false); END IF;
   RETURN jsonb_build_object(
-    'closed', v_year.year_label,
-    'opened', v_label,
-    'carry_balance', v_balance,
-    'carry_pending', v_pending
-  );
+    'found', true,
+    'suspended', v.center_status <> 'active',
+    'usable', v.center_status = 'active' AND v.invite_status = 'pending',
+    'center_id', v.center_id, 'center_name', v.center_name,
+    'role', v.invite_role, 'name', v.invite_name);
 END; $$;
-GRANT EXECUTE ON FUNCTION public.close_fiscal_year(UUID) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.get_invite_info(TEXT) TO anon, authenticated;
 
--- ----------------------------------------------------------------------------
--- ٥) العهدة: اعتماد تلقائي كأنها سليمة عندما تكون المحاسبة غير مفعلة للسنتر
---     (تسجيل الإيرادات يبقى سليماً في الخلفية دائماً عبر trigger الدفعات).
--- ----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.submit_staff_custody(p_staff UUID, p_date DATE, p_delivered NUMERIC, p_notes TEXT DEFAULT '')
-RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE cid UUID; expected NUMERIC; result UUID; v_status TEXT;
-BEGIN
-  SELECT center_id INTO cid FROM public.profiles WHERE id = auth.uid() AND role IN ('manager','secretary') AND is_active;
-  IF cid IS NULL OR p_staff <> auth.uid() THEN RAISE EXCEPTION 'not_allowed'; END IF;
-  SELECT COALESCE(SUM(amount), 0) INTO expected FROM public.center_ledger
-   WHERE center_id = cid AND created_by = p_staff AND entry_type = 'payment_collection' AND occurred_on = p_date;
-  IF public.center_accounting_enabled(cid) THEN
-    v_status := CASE WHEN p_delivered = expected THEN 'matched' WHEN p_delivered < expected THEN 'shortage' ELSE 'surplus' END;
-  ELSE
-    -- الخدمة غير مفعلة: اعتماد تلقائي كأن العهدة سليمة حتى تبقى الحسابات نظيفة في الخلفية
-    v_status := 'matched';
-  END IF;
-  INSERT INTO public.staff_custody(center_id, staff_id, custody_date, expected_amount, delivered_amount, status, notes, submitted_at, submitted_by)
-  VALUES(cid, p_staff, p_date, expected, GREATEST(p_delivered, 0), v_status, COALESCE(p_notes, ''), now(), auth.uid())
-  ON CONFLICT(center_id, staff_id, custody_date) DO UPDATE
-   SET expected_amount = EXCLUDED.expected_amount, delivered_amount = EXCLUDED.delivered_amount,
-       status = EXCLUDED.status, notes = EXCLUDED.notes, submitted_at = now(), submitted_by = auth.uid()
-  RETURNING id INTO result;
-  RETURN result;
-END; $$;
-GRANT EXECUTE ON FUNCTION public.submit_staff_custody(UUID, DATE, NUMERIC, TEXT) TO authenticated;
-
-COMMIT;
-
--- بعد التشغيل:
---   تحقق من وجود سنة مفتوحة لكل سنتر: SELECT * FROM public.center_fiscal_years;
---   وجرّب إغلاق سنة من لوحة السنتر أو من المطور، ثم تأكد من ترحيل الرصيد للسنة الجديدة.
-
--- ============================================================================
---  عداد الزوار: كل جهاز رقم فريد يُسجل مرة واحدة (لا تُعدّ تصفحات الصفحات زيارات)
--- ============================================================================
-CREATE TABLE IF NOT EXISTS public.site_visitors (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  device_id text NOT NULL UNIQUE,
-  first_seen timestamptz NOT NULL DEFAULT now(),
-  last_seen timestamptz NOT NULL DEFAULT now()
-);
-ALTER TABLE public.site_visitors ENABLE ROW LEVEL SECURITY;
-
-CREATE OR REPLACE FUNCTION public.track_site_visit(p_device_id text)
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-BEGIN
-  IF p_device_id IS NULL OR length(p_device_id) < 8 OR length(p_device_id) > 128 THEN RETURN; END IF;
-  INSERT INTO public.site_visitors(device_id, first_seen, last_seen)
-  VALUES(p_device_id, now(), now())
-  ON CONFLICT (device_id) DO UPDATE
-    SET last_seen = now()
-    WHERE public.site_visitors.last_seen < now() - interval '1 hour';
-END; $$;
-GRANT EXECUTE ON FUNCTION public.track_site_visit(text) TO anon, authenticated;
-
-CREATE OR REPLACE FUNCTION public.get_site_visitor_stats()
-RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
-DECLARE total bigint; today bigint; week bigint;
-BEGIN
-  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) IS DISTINCT FROM 'super_admin' THEN
-    RAISE EXCEPTION 'not_allowed';
-  END IF;
-  SELECT count(*) INTO total FROM public.site_visitors;
-  SELECT count(*) INTO today FROM public.site_visitors WHERE last_seen >= date_trunc('day', now());
-  SELECT count(*) INTO week FROM public.site_visitors WHERE last_seen >= now() - interval '7 days';
-  RETURN jsonb_build_object('total', total, 'today', today, 'week', week);
-END; $$;
-GRANT EXECUTE ON FUNCTION public.get_site_visitor_stats() TO authenticated;
-
--- ============================================================================
---  حجب الأجهزة من لوحة المطور (معرّف الجهاز يُسجَّل دائماً لأغراض أمنية)
--- ============================================================================
-ALTER TABLE public.site_visitors ADD COLUMN IF NOT EXISTS blocked boolean NOT NULL DEFAULT false;
-
-CREATE OR REPLACE FUNCTION public.dev_set_device_blocked(p_device_id text, p_blocked boolean)
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-BEGIN
-  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) IS DISTINCT FROM 'super_admin' THEN
-    RAISE EXCEPTION 'not_allowed';
-  END IF;
-  UPDATE public.site_visitors SET blocked = p_blocked WHERE device_id = p_device_id;
-END; $$;
-GRANT EXECUTE ON FUNCTION public.dev_set_device_blocked(text, boolean) TO authenticated;
-
-CREATE OR REPLACE FUNCTION public.dev_list_visitors()
-RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
-DECLARE v_result jsonb;
-BEGIN
-  IF (SELECT role FROM public.profiles WHERE id = auth.uid()) IS DISTINCT FROM 'super_admin' THEN
-    RAISE EXCEPTION 'not_allowed';
-  END IF;
-  SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.last_seen DESC), '[]'::jsonb) INTO v_result
-  FROM (
-    SELECT id, device_id, first_seen, last_seen, blocked
-    FROM public.site_visitors
-    ORDER BY last_seen DESC LIMIT 200
-  ) t;
-  RETURN v_result;
-END; $$;
-GRANT EXECUTE ON FUNCTION public.dev_list_visitors() TO authenticated;
-
-CREATE OR REPLACE FUNCTION public.is_device_blocked(p_device_id text)
-RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS $$
-  SELECT EXISTS (SELECT 1 FROM public.site_visitors WHERE device_id = p_device_id AND blocked);
-$$;
-GRANT EXECUTE ON FUNCTION public.is_device_blocked(text) TO anon, authenticated;
--- ١) تحصيل آمن من السباق (Race-Condition Safe)
---    يقفل صف المستحق FOR UPDATE ثم يتحقق من المتبقي قبل الإدراج.
--- ----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.record_payment(
-  p_center uuid, p_student text, p_due text, p_amount numeric,
-  p_month int, p_year int, p_notes text DEFAULT NULL
-)
-RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+-- قبول الدعوة: حساب جديد بلا ملف → ملف فريق خامل (بانتظار تفعيل صاحب السنتر)
+CREATE OR REPLACE FUNCTION public.accept_staff_invite(p_code TEXT)
+RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
-  v_due numeric; v_paid numeric; v_status text; v_name text;
-  v_actor uuid := auth.uid(); v_pid text := gen_random_uuid()::text;
-  v_has_due boolean := (p_due IS NOT NULL AND p_due <> '');
+  v_uid UUID := auth.uid();
+  v_email TEXT;
+  v RECORD;
 BEGIN
-  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
-  IF NOT public.center_is_active(p_center) THEN RAISE EXCEPTION 'center_inactive'; END IF;
-  IF NOT (public.admin_owns_center(p_center) OR public.teacher_center_ok(p_center)) THEN
-    RAISE EXCEPTION 'not_allowed';
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_uid) THEN
+    RAISE EXCEPTION 'already_registered';
   END IF;
-  IF p_amount IS NULL OR p_amount <= 0 THEN RAISE EXCEPTION 'invalid_payment_amount'; END IF;
-  IF NOT EXISTS (SELECT 1 FROM public.students WHERE id = p_student AND center_id = p_center) THEN
-    RAISE EXCEPTION 'student_not_in_center';
+  SELECT * INTO v FROM public.staff_invites WHERE code = upper(trim(p_code)) FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'invite_not_found'; END IF;
+  IF v.status <> 'pending' THEN RAISE EXCEPTION 'invite_unusable'; END IF;
+  SELECT email INTO v_email FROM auth.users WHERE id = v_uid;
+  IF v_email IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
+  IF (SELECT status FROM public.centers WHERE id = v.center_id) <> 'active' THEN
+    RAISE EXCEPTION 'center_suspended';
   END IF;
-
-  IF v_has_due THEN
-    -- قفل صف المستحق: أي عملية تحصيل أخرى لنفس المستحق تنتظر حتى تنتهي هذه
-    SELECT amount INTO v_due FROM public.dues WHERE id = p_due AND center_id = p_center FOR UPDATE;
-    IF v_due IS NULL THEN RAISE EXCEPTION 'due_not_found'; END IF;
-    SELECT COALESCE(SUM(amount), 0) INTO v_paid FROM public.payments WHERE due_id = p_due;
-    IF p_amount > (v_due - v_paid) THEN RAISE EXCEPTION 'payment_exceeds_remaining'; END IF;
-    v_status := CASE WHEN v_paid + p_amount >= v_due THEN 'paid' ELSE 'partial' END;
-  END IF;
-
-  SELECT full_name INTO v_name FROM public.profiles WHERE id = v_actor;
-
-  INSERT INTO public.payments(id, center_id, student_id, due_id, amount, payment_date, month, year, notes, collected_by, collected_by_name, created_at)
-  VALUES (v_pid, p_center, p_student, nullif(p_due, ''), p_amount, CURRENT_DATE, p_month, p_year, nullif(p_notes, ''), v_actor, COALESCE(v_name, ''), now());
-
-  IF v_has_due THEN
-    UPDATE public.dues SET status = v_status WHERE id = p_due;
-  END IF;
-
-  RETURN jsonb_build_object('id', v_pid, 'due_status', v_status);
+  INSERT INTO public.profiles (id, role, center_id, full_name, email, phone, is_active, perms)
+  VALUES (v_uid, v.role, v.center_id, v.name, v_email, v.phone, false, v.perms);
+  UPDATE public.staff_invites SET status = 'accepted' WHERE id = v.id;
 END; $$;
-GRANT EXECUTE ON FUNCTION public.record_payment(uuid, text, text, numeric, int, int, text) TO authenticated;
-
--- ----------------------------------------------------------------------------
--- ٢) جلسة واحدة لكل حساب (منع الدخول من جهازين في نفس الوقت)
--- ----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.user_active_sessions (
-  user_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
-  session_key text NOT NULL,
-  started_at timestamptz NOT NULL DEFAULT now(),
-  last_seen timestamptz NOT NULL DEFAULT now()
-);
--- لا سياسات قراءة/كتابة مباشرة: الوصول عبر الدوال فقط (SECURITY DEFINER)
-ALTER TABLE public.user_active_sessions ENABLE ROW LEVEL SECURITY;
-
--- يطالب بالجلسة عند تسجيل الدخول: آخر جهاز يسجل دخولاً يستحوذ على الجلسة
-CREATE OR REPLACE FUNCTION public.claim_session(p_key text)
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-BEGIN
-  IF auth.uid() IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
-  IF p_key IS NULL OR length(p_key) < 8 OR length(p_key) > 128 THEN RAISE EXCEPTION 'invalid_session_key'; END IF;
-  INSERT INTO public.user_active_sessions(user_id, session_key, started_at, last_seen)
-  VALUES(auth.uid(), p_key, now(), now())
-  ON CONFLICT (user_id) DO UPDATE
-    SET session_key = EXCLUDED.session_key, started_at = now(), last_seen = now();
-END; $$;
-GRANT EXECUTE ON FUNCTION public.claim_session(text) TO authenticated;
-
--- يتحقق الجهاز دورياً أنه لا يزال صاحب الجلسة الحالية
-CREATE OR REPLACE FUNCTION public.check_session(p_key text)
-RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-BEGIN
-  IF auth.uid() IS NULL THEN RETURN false; END IF;
-  IF NOT EXISTS (SELECT 1 FROM public.user_active_sessions WHERE user_id = auth.uid() AND session_key = p_key) THEN
-    RETURN false;
-  END IF;
-  UPDATE public.user_active_sessions SET last_seen = now()
-  WHERE user_id = auth.uid() AND session_key = p_key;
-  RETURN true;
-END; $$;
-GRANT EXECUTE ON FUNCTION public.check_session(text) TO authenticated;
-
--- ----------------------------------------------------------------------------
--- ٣) منع تكرار محاولة الامتحان حتى تحت التزامن (ON CONFLICT بدل الفحص ثم الإدراج)
--- ----------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.submit_exam_attempt(p_exam_id TEXT, p_answers JSONB)
-RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  v_center UUID := public.my_center_id();
-  v_sid TEXT := public.my_student_id();
-  v_exam public.app_exams%ROWTYPE;
-  v_n INT := 0;
-  v_total_marks NUMERIC := 0;
-  v_earned NUMERIC := 0;
-  v_correct INT := 0;
-  v_has_essay BOOLEAN := false;
-  v_status TEXT;
-  i INT;
-  v_q JSONB;
-  v_type TEXT;
-  v_marks NUMERIC;
-BEGIN
-  IF v_center IS NULL OR v_sid IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
-  SELECT * INTO v_exam FROM public.app_exams
-   WHERE id = p_exam_id AND center_id = v_center AND is_published;
-  IF NOT FOUND THEN RAISE EXCEPTION 'exam_not_found'; END IF;
-  IF EXISTS (SELECT 1 FROM public.app_exam_attempts WHERE exam_id = p_exam_id AND student_id = v_sid) THEN
-    RAISE EXCEPTION 'already_attempted';
-  END IF;
-  v_n := COALESCE(jsonb_array_length(v_exam.questions), 0);
-  FOR i IN 0..v_n - 1 LOOP
-    v_q := v_exam.questions -> i;
-    v_type := COALESCE(v_q ->> 'type', 'mcq');
-    v_marks := COALESCE(NULLIF(v_q ->> 'marks', '')::NUMERIC, 1);
-    v_total_marks := v_total_marks + v_marks;
-    IF v_type = 'correct' AND (v_exam.answers -> i) IS NOT NULL
-      AND (v_exam.answers -> i) = (COALESCE(p_answers, '[]'::jsonb) -> i) THEN
-      v_correct := v_correct + 1;
-      v_earned := v_earned + v_marks;
-    ELSIF v_type IN ('essay', 'correct', 'short') THEN
-      v_has_essay := true;
-    ELSIF (v_exam.answers -> i) IS NOT NULL
-      AND (v_exam.answers -> i) = (COALESCE(p_answers, '[]'::jsonb) -> i) THEN
-      v_correct := v_correct + 1;
-      v_earned := v_earned + v_marks;
-    END IF;
-  END LOOP;
-  IF v_total_marks <= 0 THEN v_total_marks := COALESCE(v_exam.total_score, 0); END IF;
-  v_status := CASE WHEN v_has_essay THEN 'pending_review' ELSE 'graded' END;
-  INSERT INTO public.app_exam_attempts (id, center_id, exam_id, student_id, answers, score, max_score, status)
-  VALUES (gen_random_uuid()::text, v_center, p_exam_id, v_sid, COALESCE(p_answers, '[]'::jsonb),
-          ROUND(v_earned, 2), v_total_marks, v_status)
-  ON CONFLICT (exam_id, student_id) DO NOTHING;
-  IF NOT FOUND THEN RAISE EXCEPTION 'already_attempted'; END IF;
-  RETURN jsonb_build_object('score', ROUND(v_earned, 2), 'max_score', v_total_marks,
-                            'correct', v_correct, 'total', v_n, 'status', v_status);
-END; $$;
-GRANT EXECUTE ON FUNCTION public.submit_exam_attempt(TEXT, JSONB) TO authenticated;
-
-
--- ٤) حماية من هجمات تخمين كلمات المرور والروبوتات (Rate Limiting خادمي)
---    لا يعتمد على أي تقرير من المتصفح وحده: الفحص يُجرى قبل كل محاولة دخول.
--- ----------------------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS public.login_attempts (
-  id bigint GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
-  email text NOT NULL,
-  device_id text NOT NULL DEFAULT '',
-  success boolean NOT NULL DEFAULT false,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS idx_login_attempts_email_time ON public.login_attempts (email, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_login_attempts_device_time ON public.login_attempts (device_id, created_at DESC);
-ALTER TABLE public.login_attempts ENABLE ROW LEVEL SECURITY;
-
--- يُستدعى قبل محاولة الدخول: يمنع تجاوز الحد الأقصى من المحاولات الفاشلة
-CREATE OR REPLACE FUNCTION public.check_login_allowed(p_email text, p_device text)
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  v_failures int;
-BEGIN
-  -- تنظيف دوري للسجلات القديمة حتى لا يتضخم الجدول
-  DELETE FROM public.login_attempts WHERE created_at < now() - interval '24 hours';
-  SELECT count(*) INTO v_failures FROM public.login_attempts
-   WHERE email = lower(trim(p_email)) AND success = false AND created_at > now() - interval '15 minutes';
-  IF v_failures >= 10 THEN RAISE EXCEPTION 'login_rate_limited'; END IF;
-  IF p_device IS NOT NULL AND p_device <> '' THEN
-    SELECT count(*) INTO v_failures FROM public.login_attempts
-     WHERE device_id = p_device AND success = false AND created_at > now() - interval '15 minutes';
-    IF v_failures >= 30 THEN RAISE EXCEPTION 'login_rate_limited'; END IF;
-  END IF;
-END; $$;
-GRANT EXECUTE ON FUNCTION public.check_login_allowed(text, text) TO anon, authenticated;
-
-CREATE OR REPLACE FUNCTION public.record_login_attempt(p_email text, p_device text, p_success boolean)
-RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-BEGIN
-  INSERT INTO public.login_attempts(email, device_id, success, created_at)
-  VALUES (lower(trim(p_email)), COALESCE(p_device, ''), p_success, now());
-END; $$;
-GRANT EXECUTE ON FUNCTION public.record_login_attempt(text, text, boolean) TO anon, authenticated;
-
+GRANT EXECUTE ON FUNCTION public.accept_staff_invite(TEXT) TO authenticated;

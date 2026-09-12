@@ -24,9 +24,11 @@ export interface PendingStudentRegistration {
 export interface PendingTeacherRegistration {
   kind: 'teacher';
   email: string;
-  centerId: string;
-  fullName: string;
-  phone: string;
+  inviteCode: string;
+  // حقول قديمة للتوافق (تسجيل ذاتي سابق) — لم تعد تُنشأ
+  centerId?: string;
+  fullName?: string;
+  phone?: string;
   staffRole?: string;
 }
 
