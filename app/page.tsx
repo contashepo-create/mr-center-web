@@ -3,16 +3,17 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { HomeRedirect, SetupNotice } from '@/components/guards';
+import { ThemeToggle } from '@/components/theme-toggle';
 import { Badge, Card, LinkButton, LoadingScreen } from '@/components/ui';
 import { useSession } from '@/context/session';
 import { fetchPublicConfig } from '@/lib/supabase';
 import type { PublicConfig } from '@/lib/types';
 
 const features = [
-  ['نفس Supabase', 'الويب والأندرويد يقرآن ويكتبان في نفس الجداول والدوال.'],
-  ['صلاحيات موحدة', 'مسئول سنتر، فريق عمل، طالب، ومطور بنفس قواعد RLS.'],
-  ['RTL عربي كامل', 'واجهة ويب مخصصة للعملاء بالعربية وليست WebView.'],
-  ['جاهز لـ Vercel', 'Next.js منفصل قابل للنشر مع Environment Variables.'],
+  ['بيانات مشتركة', 'ما تضيفه من الويب يظهر في التطبيق فوراً والعكس صحيح.'],
+  ['صلاحيات دقيقة', 'صاحب السنتر والفريق والطالب — كلٌّ يرى صلاحياته فقط.'],
+  ['عربي كامل', 'واجهة عربية RTL مريحة مصممة لأصحاب السناتر.'],
+  ['مظهر حديث', 'وضع فاتح وداكن بألوان زاهية تناسب ذوقك.'],
 ];
 
 export default function LandingPage() {
@@ -34,12 +35,13 @@ export default function LandingPage() {
         <Link href="/" className="brand" style={{ margin: 0 }}>
           <div className="logo">MR</div>
           <div>
-            <strong>Mr Center Web</strong>
-            <div className="tiny muted">منصة الويب المتصلة بالتطبيق</div>
+            <strong>Mr Center</strong>
+            <div className="tiny muted">منصة إدارة السناتر</div>
           </div>
         </Link>
         <div className="row">
-          <LinkButton href="/about" variant="secondary">حول التطبيق</LinkButton>
+          <ThemeToggle variant="secondary" />
+          <LinkButton href="/about" variant="secondary">حول المنصة</LinkButton>
           <LinkButton href="/auth/login">دخول</LinkButton>
         </div>
       </header>
@@ -50,18 +52,16 @@ export default function LandingPage() {
         ) : null}
         <section className="hero-grid">
           <div className="stack-lg">
-            <Badge tone="info">نسخة ويب حقيقية — Next.js + Supabase</Badge>
-            <h1 className="h1">نفس سيستم <span className="gradient-text">Mr Center</span> على الويب والموبايل.</h1>
+            <Badge tone="info">منصة واحدة · ويب وموبايل</Badge>
+            <h1 className="h1">أدر سنترك من أي مكان، <span className="gradient-text">بمنصة واحدة</span>.</h1>
             <p className="muted" style={{ fontSize: '1.1rem', lineHeight: 1.9, maxWidth: 720 }}>
-              هذه الواجهة تعمل كمنصة ويب مستقلة متصلة بنفس قاعدة بيانات تطبيق Android: نفس العملاء، نفس السناتر، نفس الطلاب، نفس الحضور والمدفوعات والصلاحيات.
+              نفس حسابك، نفس طلابك، نفس الحضور والمدفوعات والصلاحيات — على التطبيق وعلى الويب معاً. أضف من هنا وستجدها هناك فوراً.
             </p>
             <div className="row">
-              <LinkButton href="/auth/login?role=admin">دخول مسئول السنتر</LinkButton>
-              <LinkButton href="/auth/login?role=student" variant="secondary">دخول طالب</LinkButton>
-              <LinkButton href="/auth/login?role=teacher" variant="secondary">دخول فريق العمل</LinkButton>
+              <LinkButton href="/auth/login">تسجيل الدخول</LinkButton>
+              <LinkButton href="/auth/register-center" variant="secondary">إنشاء سنتر جديد</LinkButton>
             </div>
             <div className="row">
-              <LinkButton href="/auth/register-center" variant="secondary">إنشاء سنتر جديد</LinkButton>
               <LinkButton href="/auth/register-student" variant="secondary">تسجيل طالب جديد</LinkButton>
               <LinkButton href="/auth/register-staff" variant="secondary">انضمام فريق عمل</LinkButton>
             </div>
@@ -70,10 +70,10 @@ export default function LandingPage() {
           <Card className="hero-panel stack-lg">
             <div className="row-between">
               <div>
-                <p className="muted" style={{ margin: 0 }}>حالة الربط</p>
-                <h2 className="h2" style={{ marginTop: 6 }}>قاعدة واحدة لمنصتين</h2>
+                <p className="muted" style={{ margin: 0 }}>متصل ومتزامن</p>
+                <h2 className="h2" style={{ marginTop: 6 }}>قاعدة واحدة لكل شيء</h2>
               </div>
-              <Badge tone="success">Live DB</Badge>
+              <Badge tone="success">متصل</Badge>
             </div>
             <div className="grid grid-2">
               {features.map(([title, body]) => (
@@ -84,7 +84,7 @@ export default function LandingPage() {
               ))}
             </div>
             <div className="notice">
-              أي عملية تتم من الويب ستظهر في تطبيق Android فورًا لأنها تتم على نفس Supabase مع نفس سياسات RLS.
+              كل عملية تتم من الويب تظهر في التطبيق فوراً — لأن المنصتين تعملان على نفس البيانات.
             </div>
           </Card>
         </section>

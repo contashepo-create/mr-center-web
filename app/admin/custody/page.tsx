@@ -30,7 +30,7 @@ function label(status: Custody['status']) {
 }
 
 export default function CustodyPage() {
-  const { profile } = useSession();
+  const { profile, features } = useSession();
   const centerId = profile?.center_id;
   const [rows, setRows] = useState<Custody[]>([]);
   const [staff, setStaff] = useState<Profile[]>([]);
@@ -97,9 +97,14 @@ export default function CustodyPage() {
     } catch (err) { setError(err); }
   };
 
+  const ownerReview = isOwner(profile) && !!features?.accounting;
+
   return <>
     <PageHeader title="عهدة التحصيل" subtitle="مطابقة يومية بين تحصيل الموظفين والمبالغ المسلمة." />
     <ErrorNotice error={error} />{message ? <Notice tone="success">{message}</Notice> : null}
+    {isOwner(profile) && !features?.accounting ? (
+      <div style={{ marginBottom: 16 }}><Notice tone="warn">المحاسبة غير مفعلة لسنترك حالياً — تُعتمد العهد المسلمة تلقائياً كأنها سليمة وتُسجل الإيرادات في الخلفية. فعّل الخدمة من الإدارة للاطلاع على الدفتر المالي.</Notice></div>
+    ) : null}
     <div className="grid grid-3" style={{ marginBottom: 18 }}>
       <Card className="compact kpi"><span className="muted">متوقع الشهر</span><div className="kpi-value">{formatMoney(monthExpected)}</div></Card>
       <Card className="compact kpi"><span className="muted">مسلم الشهر</span><div className="kpi-value">{formatMoney(monthDelivered)}</div></Card>
@@ -107,8 +112,8 @@ export default function CustodyPage() {
     </div>
     <div className="grid grid-2">
       {staffAllowed ? <Card className="stack"><h2 className="h3">تسليم عهدة اليوم</h2><form className="stack" onSubmit={submitCustody}><Input label={`المبلغ المسلم — ${todayIso()}`} type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /><Input label="ملاحظات" value={notes} onChange={(e) => setNotes(e.target.value)} /><Button disabled={busy} type="submit">تسجيل وتسليم</Button></form></Card> : null}
-      <Card className="stack"><h2 className="h3">فلترة واعتماد</h2><Select label="الموظف" value={filterStaff} onChange={(e) => setFilterStaff(e.target.value)}><option value="all">الكل</option>{staff.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}</Select>{isOwner(profile) ? <Input label="ملاحظات الاعتماد" value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} /> : null}</Card>
+      <Card className="stack"><h2 className="h3">فلترة واعتماد</h2><Select label="الموظف" value={filterStaff} onChange={(e) => setFilterStaff(e.target.value)}><option value="all">الكل</option>{staff.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}</Select>{ownerReview ? <Input label="ملاحظات الاعتماد" value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} /> : null}</Card>
     </div>
-    <Card className="stack" style={{ marginTop: 18 }}><div className="row-between"><h2 className="h3">سجل العهد</h2><Badge tone="info">{visible.length}</Badge></div>{visible.length === 0 ? <EmptyState title="لا توجد عهد مسجلة" /> : <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>المتوقع</th><th>المسلم</th><th>الحالة</th><th>ملاحظات</th><th>اعتماد</th></tr></thead><tbody>{visible.map((r) => { const [txt, tone] = label(r.status); return <tr key={r.id}><td>{formatDate(r.custody_date)}</td><td>{staffName.get(r.staff_id) ?? r.staff_id}</td><td>{formatMoney(r.expected_amount)}</td><td>{formatMoney(r.delivered_amount)}</td><td><Badge tone={tone}>{txt}</Badge></td><td>{r.notes || '—'}</td><td>{isOwner(profile) ? <div className="row"><Button type="button" variant="secondary" onClick={() => void review(r.id, 'matched')}>مطابقة</Button><Button type="button" variant="secondary" onClick={() => void review(r.id, 'shortage')}>عجز</Button><Button type="button" variant="secondary" onClick={() => void review(r.id, 'surplus')}>زيادة</Button></div> : '—'}</td></tr>; })}</tbody></table></div>}</Card>
+    <Card className="stack" style={{ marginTop: 18 }}><div className="row-between"><h2 className="h3">سجل العهد</h2><Badge tone="info">{visible.length}</Badge></div>{visible.length === 0 ? <EmptyState title="لا توجد عهد مسجلة" /> : <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>المتوقع</th><th>المسلم</th><th>الحالة</th><th>ملاحظات</th><th>اعتماد</th></tr></thead><tbody>{visible.map((r) => { const [txt, tone] = label(r.status); return <tr key={r.id}><td>{formatDate(r.custody_date)}</td><td>{staffName.get(r.staff_id) ?? r.staff_id}</td><td>{formatMoney(r.expected_amount)}</td><td>{formatMoney(r.delivered_amount)}</td><td><Badge tone={tone}>{txt}</Badge></td><td>{r.notes || '—'}</td><td>{ownerReview ? <div className="row"><Button type="button" variant="secondary" onClick={() => void review(r.id, 'matched')}>مطابقة</Button><Button type="button" variant="secondary" onClick={() => void review(r.id, 'shortage')}>عجز</Button><Button type="button" variant="secondary" onClick={() => void review(r.id, 'surplus')}>زيادة</Button></div> : '—'}</td></tr>; })}</tbody></table></div>}</Card>
   </>;
 }

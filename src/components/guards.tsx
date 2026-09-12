@@ -35,26 +35,21 @@ export function SetupNotice() {
         <div className="row">
           <div className="logo">MR</div>
           <div>
-            <h1 className="h3">لم يتم ضبط اتصال Supabase</h1>
-            <p className="muted" style={{ margin: 0 }}>الويب جاهز، لكنه يحتاج مفاتيح نفس قاعدة بيانات تطبيق Android.</p>
+            <h1 className="h3">تعذر الوصول إلى البيانات</h1>
+            <p className="muted" style={{ margin: 0 }}>المنصة تقرأ الاتصال تلقائياً من خادم الإعدادات المشترك — يبدو أنه غير متاح حالياً.</p>
           </div>
         </div>
         <Notice tone="warn">
-          أضف القيم التالية في <b>.env.local</b> أثناء التطوير أو في Environment Variables على Vercel:
-          <pre style={{ direction: 'ltr', textAlign: 'left', whiteSpace: 'pre-wrap', marginTop: 12 }}>
-{`NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY`}
-          </pre>
-          ويمكن بدل ذلك استخدام <b>NEXT_PUBLIC_CONFIG_URL</b> لو تريد نفس Cloudflare Worker الخاص بالتطبيق.
+          يمكنك إدخال بيانات اتصال مؤقتة لهذا المتصفح فقط للتجربة، أو التحقق من اتصال خادم الإعدادات والمحاولة مجدداً.
         </Notice>
 
         <form className="stack" onSubmit={save}>
           <label className="input-wrap">
-            <span className="label">Supabase URL للتجربة على هذا المتصفح فقط</span>
+            <span className="label">رابط قاعدة البيانات (لتجربة هذا المتصفح فقط)</span>
             <input className="input" dir="ltr" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://xxxxx.supabase.co" />
           </label>
           <label className="input-wrap">
-            <span className="label">Anon Key</span>
+            <span className="label">مفتاح الوصول العام</span>
             <input className="input" dir="ltr" value={anonKey} onChange={(e) => setAnonKey(e.target.value)} placeholder="eyJ..." />
           </label>
           {error ? <Notice tone="error">{error}</Notice> : null}
@@ -79,7 +74,7 @@ export function RequireAuth({ roles, children }: { roles?: Role[]; children: Rea
         <div className="card auth-card stack" style={{ textAlign: 'center' }}>
           <div className="logo" style={{ marginInline: 'auto' }}>MR</div>
           <h1 className="h2">يلزم تسجيل الدخول</h1>
-          <p className="muted">هذه الصفحة مرتبطة ببيانات Supabase ولا يمكن فتحها بدون حساب.</p>
+          <p className="muted">هذه الصفحة تتطلب حساباً للوصول إليها.</p>
           <div className="row" style={{ justifyContent: 'center' }}>
             <LinkButton href={`/auth/login?next=${encodeURIComponent(pathname)}`}>تسجيل الدخول</LinkButton>
             <LinkButton href="/" variant="secondary">الرئيسية</LinkButton>
@@ -134,8 +129,7 @@ export function HomeRedirect() {
 
   useEffect(() => {
     if (!ready || !configured || !session || !profile) return;
-    if (profile.role === 'super_admin') router.replace('/developer');
-    else if (profile.role === 'student') router.replace('/student');
+    if (profile.role === 'student') router.replace('/student');
     else router.replace('/admin');
   }, [ready, configured, session, profile, router]);
 

@@ -23,9 +23,11 @@ has(sql, /CREATE OR REPLACE FUNCTION public\.calculate_staff_commission/i, 'SQL:
 
 has(api, /export async function recordPayment/, 'API: recordPayment is missing');
 has(api, /invalid_payment_amount/, 'API: recordPayment does not reject non-positive amounts');
-has(api, /paidBefore \+ amount >= dueAmount \? 'paid' : 'partial'/, 'API: due status is not based on cumulative payments');
-has(api, /collected_by: actorId, collected_by_name:/, 'API: recordPayment does not store collector identity');
-has(api, /due_not_found/, 'API: recordPayment does not reject missing due records');
+has(api, /\.rpc\('record_payment'/, 'API: recordPayment must use the atomic record_payment RPC');
+has(sql, /FOR UPDATE/, 'SQL: record_payment must lock the due row (FOR UPDATE) to prevent race conditions');
+has(sql, /p_amount > \(v_due - v_paid\)/, 'SQL: record_payment must reject payments exceeding the remaining amount');
+has(sql, /collected_by, collected_by_name/, 'SQL: record_payment must store collector identity');
+has(sql, /due_not_found/, 'SQL: record_payment does not reject missing due records');
 
 if (/value=['"]income['"]/.test(page) || /kind:\s*form\.kind/.test(page) || /setForm\([^)]*kind/.test(page)) {
   issues.push('Accounting UI: manual income entry is enabled; income must come from payment_collection trigger only');

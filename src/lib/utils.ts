@@ -379,8 +379,12 @@ export function arabicError(err: unknown): string {
   if (msg.includes('already_attempted')) return 'أديت هذا الامتحان من قبل — لا يمكن تكرار المحاولة';
   if (msg.includes('already_answered')) return 'أجبت على هذا الاستبيان من قبل';
   if (msg.includes('exam_not_found')) return 'الامتحان غير متاح حالياً';
+  if (msg.includes('login_rate_limited')) return 'محاولات دخول كثيرة — انتظر قليلاً ثم أعد المحاولة';
   if (msg.includes('invalid_payment_amount')) return 'أدخل مبلغ تحصيل صحيحاً أكبر من صفر';
   if (msg.includes('invalid_payment_period')) return 'شهر أو سنة التحصيل غير صحيحين';
+  if (msg.includes('payment_exceeds_remaining')) return 'المبلغ أكبر من المتبقي في هذا المستحق — لا يمكن تجاوز قيمة المستحق';
+  if (msg.includes('student_not_in_center')) return 'الطالب المحدد لا يخص هذا السنتر';
+  if (msg.includes('center_inactive')) return 'السنتر موقوف أو الاشتراك منتهي — لا يمكن تنفيذ هذه العملية حالياً';
   if (msg.includes('due_not_found')) return 'المستحق المحدد غير موجود أو لا تملك صلاحية تحصيله';
   if (msg.includes('invalid_group')) return 'المجموعة المختارة لا تخص هذا السنتر — أعد اختيارها';
   if (msg.includes('invalid_grade')) return 'الصف المختار لا يخص هذا السنتر — أعد اختياره';

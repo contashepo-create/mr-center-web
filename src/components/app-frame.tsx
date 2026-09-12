@@ -4,9 +4,12 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useSession } from '@/context/session';
 import { planLabel } from '@/lib/billing';
+import { setDevUnlocked } from '@/lib/devMode';
 import { can, isOwner, isStaff, roleLabel } from '@/lib/rbac';
+import type { MyFeatures } from '@/lib/features';
 import type { Profile, TeacherPermKey } from '@/lib/types';
 import { Badge, Button } from './ui';
+import { ThemeToggle } from './theme-toggle';
 
 interface NavItem {
   href: string;
@@ -14,6 +17,7 @@ interface NavItem {
   icon: string;
   perm?: TeacherPermKey | null;
   ownerOnly?: boolean;
+  feature?: 'accounting';
 }
 
 const adminNav: NavItem[] = [
@@ -28,7 +32,7 @@ const adminNav: NavItem[] = [
   { href: '/admin/library', label: 'المكتبة والشرف', icon: '📚', perm: 'honors' },
   { href: '/admin/schedule', label: 'الجدول', icon: '🗓' },
   { href: '/admin/reports', label: 'التقارير', icon: '📊', perm: 'reports' },
-  { href: '/admin/accounting', label: 'المحاسبة', icon: '💼', ownerOnly: true },
+  { href: '/admin/accounting', label: 'المحاسبة', icon: '💼', ownerOnly: true, feature: 'accounting' },
   { href: '/admin/custody', label: 'العهدة', icon: '🧾' },
   { href: '/admin/whatsapp', label: 'واتساب', icon: '☏', perm: 'notify' },
   { href: '/admin/scan', label: 'ماسح QR', icon: '▣', perm: 'attendance' },
@@ -68,9 +72,10 @@ const devNav: NavItem[] = [
   { href: '/developer/connection', label: 'الاتصال', icon: '🔌' },
 ];
 
-function visibleAdminNav(profile: Profile | null): NavItem[] {
+function visibleAdminNav(profile: Profile | null, features: MyFeatures | null): NavItem[] {
   return adminNav.filter((item) => {
     if (!profile) return false;
+    if (item.feature === 'accounting' && !features?.accounting) return false;
     if (item.ownerOnly) return isOwner(profile);
     if (isStaff(profile) && item.perm) return can(profile, item.perm);
     return true;
@@ -80,9 +85,15 @@ function visibleAdminNav(profile: Profile | null): NavItem[] {
 export function AppFrame({ area, children }: { area: 'admin' | 'student' | 'developer'; children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { profile, subscription, signOut } = useSession();
+  const { profile, subscription, features, signOut } = useSession();
 
-  const nav = area === 'admin' ? visibleAdminNav(profile) : area === 'student' ? studentNav : devNav;
+  const nav = area === 'admin' ? visibleAdminNav(profile, features) : area === 'student' ? studentNav : devNav;
+  const displayRole = area === 'admin' && profile?.role === 'super_admin' ? 'الإدارة' : roleLabel(profile?.role ?? '');
+
+  const exitDevPanel = () => {
+    setDevUnlocked(false);
+    router.replace('/admin');
+  };
 
   const logout = async () => {
     await signOut();
@@ -104,11 +115,11 @@ export function AppFrame({ area, children }: { area: 'admin' | 'student' | 'deve
           <div className="row-between">
             <div>
               <strong>{profile?.full_name || 'مستخدم'}</strong>
-              <div className="tiny muted">{roleLabel(profile?.role ?? '')}</div>
+              <div className="tiny muted">{displayRole}</div>
             </div>
-            {profile?.role === 'super_admin' ? <Badge tone="info">مطور</Badge> : null}
+            {area === 'developer' && profile?.role === 'super_admin' ? <Badge tone="info">مطور</Badge> : null}
           </div>
-          {subscription ? (
+          {subscription && area !== 'developer' ? (
             <div className="row">
               <Badge tone={subscription.status === 'active' ? 'success' : 'warn'}>{planLabel(subscription.plan_type)}</Badge>
               {typeof subscription.days_left === 'number' ? <span className="tiny muted">{subscription.days_left} يوم متبقي</span> : null}
@@ -130,7 +141,16 @@ export function AppFrame({ area, children }: { area: 'admin' | 'student' | 'deve
         </nav>
 
         <div style={{ marginTop: 24 }} className="stack">
-          <Link className="nav-link" href="/about"><span>؟</span><span>حول النظام</span></Link>
+          {area === 'admin' && profile?.role === 'super_admin' ? (
+            <Button className="block" onClick={() => router.push('/developer')}>⌘ لوحة المطور</Button>
+          ) : null}
+          {area === 'developer' ? (
+            <Button variant="secondary" className="block" onClick={exitDevPanel}>العودة للوحة السنتر</Button>
+          ) : null}
+          <div className="row">
+            <ThemeToggle variant="secondary" />
+            <Link className="nav-link" href="/about" style={{ flex: 1 }}><span>؟</span><span>حول النظام</span></Link>
+          </div>
           <Button variant="secondary" onClick={logout}>تسجيل الخروج</Button>
         </div>
       </aside>
