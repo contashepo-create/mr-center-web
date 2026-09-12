@@ -147,7 +147,10 @@ function LoginForm() {
       if (!roleAllowed(role, actualRole)) throw new Error('هذا الحساب لا يطابق نوع الدخول المختار.');
 
       await refresh();
-      router.replace(search.get('next') || targetForRole(actualRole));
+      // منع التوجيه الخارجي: لا نقبل «next» إلا مساراً داخلياً يبدأ بـ / واحدة
+      const nextParam = search.get('next');
+      const safeNext = nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : null;
+      router.replace(safeNext || targetForRole(actualRole));
     } catch (err) {
       try { await getSupabase().auth.signOut(); } catch { /* ignore */ }
       setError(friendlyLoginError(err));
