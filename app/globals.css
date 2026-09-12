@@ -390,6 +390,8 @@ tbody tr:hover { background: var(--surface-2); }
 .choice-dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border-strong); display: inline-block; flex-shrink: 0; transition: all .15s ease; }
 .choice-dot.on { border-color: var(--accent); background: radial-gradient(circle, var(--accent) 40%, transparent 45%); }
 .choice-selected { background: color-mix(in srgb, var(--accent) 10%, var(--surface-2)); }
+.review-correct { background: color-mix(in srgb, var(--success) 10%, var(--surface-2)); }
+.review-wrong { background: color-mix(in srgb, var(--danger) 10%, var(--surface-2)); }
 
 /* ===== لوحة الشرف الاحتفالية ===== */
 .honor-board { display: flex; flex-direction: column; gap: 12px; }

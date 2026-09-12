@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader, formatStatus } from '@/components/ui';
+import { ExamReview } from '@/components/exam/review';
 import { fetchMyExamAttempts, fetchPublishedExams, submitExam, type ExamResult } from '@/lib/api';
 import type { ExamAnswer, ExamAttempt, ExamQuestion, PublishedExam } from '@/lib/types';
 import { EXAM_TYPE_LABEL, formatDate, normalizeAnswerText } from '@/lib/utils';
@@ -108,12 +109,12 @@ export default function StudentExamsPage() {
   return <>
     <PageHeader title="اختباراتي" subtitle="الاختبارات المنشورة من السنتر." />
     <ErrorNotice error={error} />{message ? <Notice tone="success">{message}</Notice> : null}
-    {!active ? <Card className="stack"><div className="row-between"><h2 className="h3">المتاح</h2><Badge tone="info">{exams.length}</Badge></div>{exams.length === 0 ? <EmptyState title="لا توجد اختبارات منشورة" /> : exams.map((e) => { const used = usedFor(e.id); const allowed = e.attempts_allowed ?? 1; const done = used >= allowed; return <div key={e.id} className="card compact soft stack"><div className="row-between"><strong>{e.title}</strong><Badge tone={done ? 'success' : 'info'}>{done ? 'اكتملت المحاولات' : 'متاح'}</Badge></div><p className="muted small">{e.subject || 'بدون مادة'} · {e.questions.length} سؤال · {e.total_score} درجة · {e.duration_minutes} دقيقة · المحاولات {used} / {allowed} · {formatDate(e.created_at)}</p><Button type="button" disabled={done} onClick={() => start(e)}>{done ? 'استنفدت المحاولات' : used > 0 ? 'إعادة المحاولة' : 'بدء الاختبار'}</Button></div>; })}</Card> : <Card className="stack"><div className="row-between"><div><h2 className="h3">{active.title}</h2><p className="muted small">{active.duration_minutes} دقيقة · {active.total_score} درجة · المحاولات {usedFor(active.id)} / {active.attempts_allowed ?? 1}</p></div>{secondsLeft !== null && !result ? <Badge tone={secondsLeft < 60 ? 'danger' : 'info'}>⏱ {fmt(secondsLeft)}</Badge> : null}<Button variant="secondary" type="button" onClick={() => setActive(null)}>خروج</Button></div>{result ? <ResultPanel result={result} mode={active.show_result ?? 'end'} questions={active.questions} onBack={() => setActive(null)} /> : <><div className="card compact soft stack" style={{ padding: '14px 16px' }}><div className="row-between"><span className="muted small">تقدّمك: {progress.answered} من {progress.total} سؤال مُجاب</span><span className="muted small">{progress.pct}%</span></div><div className="progress-track"><div className="progress-fill" style={{ width: `${progress.pct}%` }} /></div></div>{active.questions.map((q, i) => <div key={i} className="card compact soft stack"><div className="row-between"><Badge tone="info">{EXAM_TYPE_LABEL[q.type] ?? q.type}</Badge><Badge>{q.marks} درجة</Badge></div><strong>{i + 1}. {q.q}</strong><QuestionInput q={q} value={answers[i]} onChange={(v) => setAnswers((old) => old.map((x, idx) => idx === i ? v : x))} /></div>)}<Button disabled={busy} type="button" onClick={confirmSubmit}>{busy ? 'جاري التسليم...' : 'تسليم الاختبار'}</Button></>}</Card>}
+    {!active ? <Card className="stack"><div className="row-between"><h2 className="h3">المتاح</h2><Badge tone="info">{exams.length}</Badge></div>{exams.length === 0 ? <EmptyState title="لا توجد اختبارات منشورة" /> : exams.map((e) => { const used = usedFor(e.id); const allowed = e.attempts_allowed ?? 1; const done = used >= allowed; return <div key={e.id} className="card compact soft stack"><div className="row-between"><strong>{e.title}</strong><Badge tone={done ? 'success' : 'info'}>{done ? 'اكتملت المحاولات' : 'متاح'}</Badge></div><p className="muted small">{e.subject || 'بدون مادة'} · {e.questions.length} سؤال · {e.total_score} درجة · {e.duration_minutes} دقيقة · المحاولات {used} / {allowed} · {formatDate(e.created_at)}</p><Button type="button" disabled={done} onClick={() => start(e)}>{done ? 'استنفدت المحاولات' : used > 0 ? 'إعادة المحاولة' : 'بدء الاختبار'}</Button></div>; })}</Card> : <Card className="stack"><div className="row-between"><div><h2 className="h3">{active.title}</h2><p className="muted small">{active.duration_minutes} دقيقة · {active.total_score} درجة · المحاولات {usedFor(active.id)} / {active.attempts_allowed ?? 1}</p></div>{secondsLeft !== null && !result ? <Badge tone={secondsLeft < 60 ? 'danger' : 'info'}>⏱ {fmt(secondsLeft)}</Badge> : null}<Button variant="secondary" type="button" onClick={() => setActive(null)}>خروج</Button></div>{result ? <ResultPanel result={result} mode={active.show_result ?? 'end'} questions={active.questions} answers={answers} studentName={profile?.full_name} onBack={() => setActive(null)} /> : <><div className="card compact soft stack" style={{ padding: '14px 16px' }}><div className="row-between"><span className="muted small">تقدّمك: {progress.answered} من {progress.total} سؤال مُجاب</span><span className="muted small">{progress.pct}%</span></div><div className="progress-track"><div className="progress-fill" style={{ width: `${progress.pct}%` }} /></div></div>{active.questions.map((q, i) => <div key={i} className="card compact soft stack"><div className="row-between"><Badge tone="info">{EXAM_TYPE_LABEL[q.type] ?? q.type}</Badge><Badge>{q.marks} درجة</Badge></div><strong>{i + 1}. {q.q}</strong><QuestionInput q={q} value={answers[i]} onChange={(v) => setAnswers((old) => old.map((x, idx) => idx === i ? v : x))} /></div>)}<Button disabled={busy} type="button" onClick={confirmSubmit}>{busy ? 'جاري التسليم...' : 'تسليم الاختبار'}</Button></>}</Card>}
     <Card className="stack" style={{ marginTop: 18 }}><h2 className="h3">محاولاتي السابقة</h2>{attempts.length === 0 ? <EmptyState title="لا توجد محاولات" /> : <div className="table-wrap"><table><thead><tr><th>الاختبار</th><th>الدرجة</th><th>الحالة</th><th>التاريخ</th></tr></thead><tbody>{attempts.map((a) => { const st = formatStatus(a.status); return <tr key={a.id}><td>{exams.find((e) => e.id === a.exam_id)?.title ?? a.exam_id}</td><td>{a.score} / {a.max_score}</td><td><Badge tone={st.tone}>{st.text}</Badge></td><td>{formatDate(a.created_at)}</td></tr>; })}</tbody></table></div>}</Card>
   </>;
 }
 
-function ResultPanel({ result, mode, questions, onBack }: { result: ExamResult; mode: 'after_each' | 'end' | 'never'; questions: ExamQuestion[]; onBack: () => void }) {
+function ResultPanel({ result, mode, questions, answers, studentName, onBack }: { result: ExamResult; mode: 'after_each' | 'end' | 'never'; questions: ExamQuestion[]; answers: ExamAnswer[]; studentName?: string | null; onBack: () => void }) {
   if (mode === 'never') {
     return <Card className="soft stack" style={{ textAlign: 'center' }}>
       <div style={{ fontSize: 36 }}>🔒</div>
@@ -122,59 +123,6 @@ function ResultPanel({ result, mode, questions, onBack }: { result: ExamResult; 
       <div className="row" style={{ justifyContent: 'center' }}><Button type="button" onClick={onBack}>العودة إلى الاختبارات</Button></div>
     </Card>;
   }
-  if (mode === 'after_each') {
-    return <Card className="stack">
-      <div className="row-between">
-        <h3 className="h3">نتيجة التصحيح التلقائي</h3>
-        <Badge tone={result.status === 'pending_review' ? 'warn' : 'success'}>{result.status === 'pending_review' ? 'بانتظار مراجعة المعلم' : 'تم التصحيح'}</Badge>
-      </div>
-      {(result.per_question ?? []).map((r) => {
-        const q = questions[r.q];
-        if (!q) return null;
-        const manual = r.correct === null;
-        return <div key={r.q} className="row-between card compact soft">
-          <span style={{ flex: 1 }}><b>{r.q + 1}.</b> {q.q}</span>
-          {manual
-            ? <Badge tone="warn">بانتظار المراجعة</Badge>
-            : r.correct
-              ? <Badge tone="success">✓ صحيحة · {r.earned}/{r.marks}</Badge>
-              : <Badge tone="danger">✗ خاطئة · {r.earned}/{r.marks}</Badge>}
-        </div>;
-      })}
-      <div className="row-between">
-        <strong>النتيجة النهائية: {result.score} من {result.max_score}</strong>
-        <Button type="button" onClick={onBack}>العودة إلى الاختبارات</Button>
-      </div>
-    </Card>;
-  }
-  return <Card className="stack">
-    <div className="card compact soft stack" style={{ textAlign: 'center', padding: '22px 18px' }}>
-      <div style={{ fontSize: 36 }}>🎉</div>
-      <h3 className="h3">تم التسليم — نتيجتك {result.score} من {result.max_score}</h3>
-      <p className="muted">{result.status === 'pending_review' ? 'هناك أسئلة بانتظار مراجعة المعلم.' : `أجبت صحيحاً على ${result.correct} من ${result.total} سؤال.`}</p>
-    </div>
-    <ReviewList result={result} questions={questions} />
-    <div className="row" style={{ justifyContent: 'flex-start' }}><Button type="button" onClick={onBack}>العودة إلى الاختبارات</Button></div>
-  </Card>;
-}
-
-/** مراجعة سؤال بسؤال (نفس مراجعة النسخة الأصلية بعد التسليم) */
-function ReviewList({ result, questions }: { result: ExamResult; questions: ExamQuestion[] }) {
-  if (!(result.per_question ?? []).length) return null;
-  return <div className="stack" style={{ gap: 8 }}>
-    <h3 className="h3">مراجعة الإجابات</h3>
-    {(result.per_question ?? []).map((r) => {
-      const q = questions[r.q];
-      if (!q) return null;
-      const manual = r.correct === null;
-      return <div key={r.q} className="row-between card compact soft">
-        <span style={{ flex: 1 }}><b>{r.q + 1}.</b> {q.q}</span>
-        {manual
-          ? <Badge tone="warn">بانتظار المراجعة</Badge>
-          : r.correct
-            ? <Badge tone="success">✓ صحيحة · {r.earned}/{r.marks}</Badge>
-            : <Badge tone="danger">✗ خاطئة · {r.earned}/{r.marks}</Badge>}
-      </div>;
-    })}
-  </div>;
+  // after_each و end كلاهما يعرض النتيجة والمراجعة بعد التسليم
+  return <ExamReview result={result} questions={questions} answers={answers} studentName={studentName} onBack={onBack} />;
 }

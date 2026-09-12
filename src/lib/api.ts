@@ -1094,7 +1094,8 @@ export interface ExamResult {
   status: string;
   attempts_used?: number;
   attempts_allowed?: number;
-  per_question?: { q: number; correct: boolean | null; earned: number; marks: number }[];
+  /** مراجعة سؤال بسؤال؛ model = الإجابة النموذجية (إن أُرفقت من الخادم) */
+  per_question?: { q: number; correct: boolean | null; earned: number; marks: number; model?: ExamAnswer }[];
 }
 
 export async function submitExam(examId: string, answers: ExamAnswer[]): Promise<ExamResult> {

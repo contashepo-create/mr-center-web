@@ -106,14 +106,14 @@ BEGIN
       v_correct := v_correct + 1; v_earned := v_earned + v_marks;
     ELSIF v_type IN ('essay', 'correct', 'short') THEN
       v_has_essay := true;
-      v_results := v_results || jsonb_build_object('q', i, 'correct', NULL, 'earned', 0, 'marks', v_marks);
+      v_results := v_results || jsonb_build_object('q', i, 'correct', NULL, 'earned', 0, 'marks', v_marks, 'model', (v_exam.answers -> i));
       CONTINUE;
     ELSIF (v_exam.answers -> i) IS NOT NULL
       AND (v_exam.answers -> i) = (COALESCE(p_answers, '[]'::jsonb) -> i) THEN
       v_ok := true; v_earn := v_marks;
       v_correct := v_correct + 1; v_earned := v_earned + v_marks;
     END IF;
-    v_results := v_results || jsonb_build_object('q', i, 'correct', v_ok, 'earned', v_earn, 'marks', v_marks);
+    v_results := v_results || jsonb_build_object('q', i, 'correct', v_ok, 'earned', v_earn, 'marks', v_marks, 'model', (v_exam.answers -> i));
   END LOOP;
 
   IF v_total_marks <= 0 THEN v_total_marks := COALESCE(v_exam.total_score, 0); END IF;
