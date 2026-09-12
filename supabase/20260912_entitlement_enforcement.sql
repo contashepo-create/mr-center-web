@@ -72,7 +72,8 @@ BEGIN
   END IF;
   SELECT kind INTO v_kind FROM public.centers WHERE id = NEW.center_id;
   SELECT plan_type INTO v_plan FROM public.center_subscriptions
-   WHERE center_id = NEW.center_id ORDER BY ends_on DESC LIMIT 1;
+   WHERE center_id = NEW.center_id AND status = 'active'
+   ORDER BY ends_on DESC NULLS LAST LIMIT 1;
   IF NEW.role = 'manager' THEN
     v_max := 0; -- لا مدير إضافي أبداً: المالك هو المدير الوحيد
   ELSIF NEW.role = 'secretary' THEN
