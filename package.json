@@ -1,0 +1,36 @@
+{
+  "name": "mr-center-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev --hostname 0.0.0.0",
+    "build": "next build",
+    "start": "next start --hostname 0.0.0.0",
+    "typecheck": "tsc --noEmit --noUnusedLocals --noUnusedParameters",
+    "test:pure": "tsx scripts/test-pure.ts",
+    "test:routes": "node scripts/check-routes.mjs",
+    "audit:security": "node scripts/audit-security.mjs",
+    "smoke": "node scripts/smoke-pages.mjs",
+    "test": "npm run typecheck && npm run test:pure && npm run test:routes && npm run audit:code && npm run audit:security && npm run audit:accounting",
+    "test:e2e:live": "node scripts/e2e-live.mjs",
+    "compare:android": "node scripts/compare-android-parity.mjs",
+    "audit:code": "node scripts/audit-code-health.mjs",
+    "audit:accounting": "node scripts/audit-accounting.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.57.4",
+    "next": "^16.3.5",
+    "qrcode": "^1.5.4",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.2",
+    "@types/qrcode": "^1.5.6"
+  }
+}
