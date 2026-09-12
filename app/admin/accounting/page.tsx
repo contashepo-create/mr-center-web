@@ -61,20 +61,44 @@ function AccountingUpsell({ centerId }: { centerId: string }) {
 
   return (
     <main className="container" style={{ padding: '28px 0' }}>
-      <Card className="stack-lg" style={{ maxWidth: 680, margin: '0 auto', textAlign: 'center' }}>
-        <div className="logo" style={{ margin: '0 auto' }}>💼</div>
-        <div>
-          <h1 className="h2">المحاسبة — خدمة إضافية</h1>
+      <Card className="stack-lg" style={{ maxWidth: 760, margin: '0 auto' }}>
+        <div style={{ textAlign: 'center' }}>
+          <div className="logo" style={{ margin: '0 auto' }}>💼</div>
+          <h1 className="h2" style={{ marginTop: 10 }}>المحاسبة الذكية لسنترك</h1>
           <p className="muted" style={{ lineHeight: 1.9 }}>
-            سجلاتك المالية تُحفظ وتُسجل تلقائياً في الخلفية منذ بداية اشتراكك (الإيرادات والتحصيل والعهدة)،
-            لكن الاطلاع على الدفتر المالي وتسجيل المصروفات والرواتب والعمولات متاح بعد تفعيل الخدمة من الإدارة.
+            دفتر مالي كامل يمسك حساباتك تلقائياً لحظة بلحظة — بلا جداول Excel ولا أوراق.
+            كل ريال يدخل أو يخرج من سنترك يظهر في مكانه الصحيح فوراً.
           </p>
         </div>
-        <Notice tone="warn">هذه الخدمة مدفوعة وتُفعَّل لكل سنتر على حدة. عند التفعيل ستجد كل حساباتك جاهزة من البداية.</Notice>
+
+        <div className="grid grid-2" style={{ marginTop: 8 }}>
+          {[
+            ['📒', 'دفتر إيرادات ومصروفات', 'كل عملية تحصيل تُسجل تلقائياً، والمصروفات والرواتب تدخلها بنقرة واحدة.'],
+            ['📆', 'السنة المالية', 'افتح وأغلق سنتك المالية، ورصيد الافتتاح والمعلق يُرحَّل تلقائياً للسنة الجديدة.'],
+            ['🧾', 'العهدة اليومية', 'مسئول العهدة يسلم عهدته كل يوم، وترى الفروق والتسليمات بضغطة زر.'],
+            ['💸', 'رواتب وسلف ومكافآت', 'سجّل رواتب موظفيك وسلفهم، وافصلها عن المصروفات العادية بدقة.'],
+            ['🤝', 'عمولات المحصلين', 'حدد نسبة عمولة لكل موظف واحسب مستحقاته آلياً من تحصيلاته.'],
+            ['📊', 'تقارير جاهزة للطباعة', 'ملخص مالي شهري وسنوي بصيغة PDF يجهز نفسه بنفسه.'],
+          ].map(([icon, title, desc]) => (
+            <div key={title} className="card compact soft row" style={{ alignItems: 'flex-start' }}>
+              <div className="logo" style={{ width: 42, height: 42, fontSize: 20, flexShrink: 0 }}>{icon}</div>
+              <div>
+                <strong>{title}</strong>
+                <p className="muted small" style={{ lineHeight: 1.8, marginTop: 4 }}>{desc}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <Notice tone="info">
+          مهم: حساباتك تُحفظ وتُسجل في الخلفية منذ بداية اشتراكك — لذلك عند التفعيل ستجد أرصدتك وسجلاتك كاملة
+          وجاهزة من أول يوم، ولن تفقد أي معلومة.
+        </Notice>
+        <Notice tone="warn">الخدمة مدفوعة وتُفعَّل لكل سنتر على حدة بعد مراجعة طلبك من الإدارة.</Notice>
         <ErrorNotice error={error} />
         {message ? <Notice tone="success">{message}</Notice> : null}
         <Button type="button" className="block" disabled={busy} onClick={request}>
-          {busy ? 'جارٍ الإرسال...' : 'طلب تفعيل الخدمة'}
+          {busy ? 'جارٍ الإرسال...' : '🔓 اطلب تفعيل المحاسبة الآن'}
         </Button>
       </Card>
     </main>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader, formatStatus } from '@/components/ui';
 import { fetchMyExamAttempts, fetchPublishedExams, submitExam, type ExamResult } from '@/lib/api';
 import type { ExamAnswer, ExamAttempt, ExamQuestion, PublishedExam } from '@/lib/types';
@@ -16,11 +16,11 @@ function defaultAnswer(q: ExamQuestion): ExamAnswer {
 function QuestionInput({ q, value, onChange }: { q: ExamQuestion; value: ExamAnswer; onChange: (v: ExamAnswer) => void }) {
   if (q.type === 'mcq' || q.type === 'tf') {
     const choices = q.type === 'tf' && (!q.choices || q.choices.length === 0) ? ['صح', 'خطأ'] : q.choices;
-    return <div className="tabs">{choices.map((c, i) => <button type="button" key={i} className={`tab ${value === i ? 'active' : ''}`} onClick={() => onChange(i)}>{c}</button>)}</div>;
+    return <div className="stack" style={{ gap: 8 }}>{choices.map((c, i) => <button type="button" key={i} className={`card compact soft row ${value === i ? 'choice-selected' : ''}`} style={{ width: '100%', textAlign: 'start', cursor: 'pointer', border: value === i ? '2px solid var(--accent)' : undefined }} onClick={() => onChange(i)}><span className={`choice-dot ${value === i ? 'on' : ''}`} />{c}</button>)}</div>;
   }
   if (q.type === 'multi') {
     const arr = Array.isArray(value) ? value : [];
-    return <div className="stack">{q.choices.map((c, i) => <label key={i} className="row small"><input type="checkbox" checked={arr.includes(i)} onChange={(e) => onChange(e.target.checked ? [...arr, i] : arr.filter((x) => x !== i))} /> {c}</label>)}</div>;
+    return <div className="stack">{q.choices.map((c, i) => <label key={i} className="row small" style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 14, background: 'var(--soft)' }}><input type="checkbox" checked={arr.includes(i)} onChange={(e) => onChange(e.target.checked ? [...arr, i] : arr.filter((x) => x !== i))} /> {c}</label>)}</div>;
   }
   if (q.type === 'match') {
     const arr = Array.isArray(value) ? value : [];
@@ -40,11 +40,36 @@ export default function StudentExamsPage() {
   const [error, setError] = useState<unknown>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [result, setResult] = useState<ExamResult | null>(null);
+  const [secondsLeft, setSecondsLeft] = useState<number | null>(null);
 
   const load = async () => { setError(null); try { const [e, a] = await Promise.all([fetchPublishedExams(), profile?.student_id ? fetchMyExamAttempts(profile.student_id) : Promise.resolve([])]); setExams(e); setAttempts(a); } catch (err) { setError(err); } };
   useEffect(() => { void load(); }, [profile?.student_id]);
   const usedFor = (examId: string) => attempts.filter((a) => a.exam_id === examId).length;
-  const start = (exam: PublishedExam) => { setActive(exam); setAnswers(exam.questions.map(defaultAnswer)); setMessage(null); setError(null); setResult(null); };
+  const start = (exam: PublishedExam) => { setActive(exam); setAnswers(exam.questions.map(defaultAnswer)); setMessage(null); setError(null); setResult(null); setSecondsLeft((exam.duration_minutes ?? 30) * 60); };
+
+  // عدّاد تنازلي — عند انتهاء الوقت يُسلَّم الاختبار تلقائياً
+  useEffect(() => {
+    if (!active || result) return;
+    if (secondsLeft === null) return;
+    if (secondsLeft <= 0) { void submit(); return; }
+    const t = setTimeout(() => setSecondsLeft((s) => (s === null ? null : s - 1)), 1000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, secondsLeft, result]);
+
+  const progress = useMemo(() => {
+    if (!active) return { answered: 0, total: 0, pct: 0 };
+    const total = active.questions.length;
+    const answered = answers.filter((a, i) => {
+      const q = active.questions[i];
+      if (q.type === 'mcq' || q.type === 'tf') return a !== null && a !== undefined && a !== '';
+      if (q.type === 'multi' || q.type === 'match') return Array.isArray(a) && a.length > 0;
+      return typeof a === 'string' && a.trim() !== '';
+    }).length;
+    return { answered, total, pct: total ? Math.round((answered / total) * 100) : 0 };
+  }, [active, answers]);
+
+  const fmt = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
   const submit = async () => {
     if (!active) return;
     setBusy(true); setError(null); setMessage(null); setResult(null);
@@ -71,10 +96,19 @@ export default function StudentExamsPage() {
     finally { setBusy(false); }
   };
 
+  const confirmSubmit = () => {
+    if (!active) return;
+    const unanswered = active.questions.length - progress.answered;
+    const msg = unanswered > 0
+      ? `لديك ${unanswered} سؤال بلا إجابة. هل تريد التسليم الآن؟`
+      : 'هل تريد تسليم الاختبار الآن؟';
+    if (window.confirm(msg)) void submit();
+  };
+
   return <>
     <PageHeader title="اختباراتي" subtitle="الاختبارات المنشورة من السنتر." />
     <ErrorNotice error={error} />{message ? <Notice tone="success">{message}</Notice> : null}
-    {!active ? <Card className="stack"><div className="row-between"><h2 className="h3">المتاح</h2><Badge tone="info">{exams.length}</Badge></div>{exams.length === 0 ? <EmptyState title="لا توجد اختبارات منشورة" /> : exams.map((e) => { const used = usedFor(e.id); const allowed = e.attempts_allowed ?? 1; const done = used >= allowed; return <div key={e.id} className="card compact soft stack"><div className="row-between"><strong>{e.title}</strong><Badge tone={done ? 'success' : 'info'}>{done ? 'اكتملت المحاولات' : 'متاح'}</Badge></div><p className="muted small">{e.subject || 'بدون مادة'} · {e.questions.length} سؤال · {e.total_score} درجة · {e.duration_minutes} دقيقة · المحاولات {used} / {allowed} · {formatDate(e.created_at)}</p><Button type="button" disabled={done} onClick={() => start(e)}>{done ? 'استنفدت المحاولات' : used > 0 ? 'إعادة المحاولة' : 'بدء الاختبار'}</Button></div>; })}</Card> : <Card className="stack"><div className="row-between"><div><h2 className="h3">{active.title}</h2><p className="muted small">{active.duration_minutes} دقيقة · {active.total_score} درجة · المحاولات {usedFor(active.id)} / {active.attempts_allowed ?? 1}</p></div><Button variant="secondary" type="button" onClick={() => setActive(null)}>خروج</Button></div>{result ? <ResultPanel result={result} mode={active.show_result ?? 'end'} questions={active.questions} onBack={() => setActive(null)} /> : <>{active.questions.map((q, i) => <div key={i} className="card compact soft stack"><div className="row-between"><Badge tone="info">{EXAM_TYPE_LABEL[q.type] ?? q.type}</Badge><Badge>{q.marks} درجة</Badge></div><strong>{i + 1}. {q.q}</strong><QuestionInput q={q} value={answers[i]} onChange={(v) => setAnswers((old) => old.map((x, idx) => idx === i ? v : x))} /></div>)}<Button disabled={busy} type="button" onClick={submit}>{busy ? 'جاري التسليم...' : 'تسليم الاختبار'}</Button></>}</Card>}
+    {!active ? <Card className="stack"><div className="row-between"><h2 className="h3">المتاح</h2><Badge tone="info">{exams.length}</Badge></div>{exams.length === 0 ? <EmptyState title="لا توجد اختبارات منشورة" /> : exams.map((e) => { const used = usedFor(e.id); const allowed = e.attempts_allowed ?? 1; const done = used >= allowed; return <div key={e.id} className="card compact soft stack"><div className="row-between"><strong>{e.title}</strong><Badge tone={done ? 'success' : 'info'}>{done ? 'اكتملت المحاولات' : 'متاح'}</Badge></div><p className="muted small">{e.subject || 'بدون مادة'} · {e.questions.length} سؤال · {e.total_score} درجة · {e.duration_minutes} دقيقة · المحاولات {used} / {allowed} · {formatDate(e.created_at)}</p><Button type="button" disabled={done} onClick={() => start(e)}>{done ? 'استنفدت المحاولات' : used > 0 ? 'إعادة المحاولة' : 'بدء الاختبار'}</Button></div>; })}</Card> : <Card className="stack"><div className="row-between"><div><h2 className="h3">{active.title}</h2><p className="muted small">{active.duration_minutes} دقيقة · {active.total_score} درجة · المحاولات {usedFor(active.id)} / {active.attempts_allowed ?? 1}</p></div>{secondsLeft !== null && !result ? <Badge tone={secondsLeft < 60 ? 'danger' : 'info'}>⏱ {fmt(secondsLeft)}</Badge> : null}<Button variant="secondary" type="button" onClick={() => setActive(null)}>خروج</Button></div>{result ? <ResultPanel result={result} mode={active.show_result ?? 'end'} questions={active.questions} onBack={() => setActive(null)} /> : <><div className="card compact soft stack" style={{ padding: '14px 16px' }}><div className="row-between"><span className="muted small">تقدّمك: {progress.answered} من {progress.total} سؤال مُجاب</span><span className="muted small">{progress.pct}%</span></div><div className="progress-track"><div className="progress-fill" style={{ width: `${progress.pct}%` }} /></div></div>{active.questions.map((q, i) => <div key={i} className="card compact soft stack"><div className="row-between"><Badge tone="info">{EXAM_TYPE_LABEL[q.type] ?? q.type}</Badge><Badge>{q.marks} درجة</Badge></div><strong>{i + 1}. {q.q}</strong><QuestionInput q={q} value={answers[i]} onChange={(v) => setAnswers((old) => old.map((x, idx) => idx === i ? v : x))} /></div>)}<Button disabled={busy} type="button" onClick={confirmSubmit}>{busy ? 'جاري التسليم...' : 'تسليم الاختبار'}</Button></>}</Card>}
     <Card className="stack" style={{ marginTop: 18 }}><h2 className="h3">محاولاتي السابقة</h2>{attempts.length === 0 ? <EmptyState title="لا توجد محاولات" /> : <div className="table-wrap"><table><thead><tr><th>الاختبار</th><th>الدرجة</th><th>الحالة</th><th>التاريخ</th></tr></thead><tbody>{attempts.map((a) => { const st = formatStatus(a.status); return <tr key={a.id}><td>{exams.find((e) => e.id === a.exam_id)?.title ?? a.exam_id}</td><td>{a.score} / {a.max_score}</td><td><Badge tone={st.tone}>{st.text}</Badge></td><td>{formatDate(a.created_at)}</td></tr>; })}</tbody></table></div>}</Card>
   </>;
 }
