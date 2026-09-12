@@ -1922,16 +1922,16 @@ CREATE POLICY ledger_owner_all ON public.center_ledger FOR ALL TO authenticated
 CREATE TABLE IF NOT EXISTS public.center_fiscal_years (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   center_id UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
-  year INT NOT NULL CHECK (year BETWEEN 2000 AND 2100),
+  fiscal_year INT NOT NULL CHECK (fiscal_year BETWEEN 2000 AND 2100),
   status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','closed')),
   opening_balance NUMERIC(12,2) NOT NULL DEFAULT 0,
   closing_balance NUMERIC(12,2),
   opened_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   closed_at TIMESTAMPTZ,
   closed_by UUID REFERENCES auth.users(id),
-  UNIQUE (center_id, year)
+  UNIQUE (center_id, fiscal_year)
 );
-CREATE INDEX IF NOT EXISTS idx_fiscal_center_year ON public.center_fiscal_years(center_id, year DESC);
+CREATE INDEX IF NOT EXISTS idx_fiscal_center_year ON public.center_fiscal_years(center_id, fiscal_year DESC);
 ALTER TABLE public.center_fiscal_years ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS fiscal_owner_all ON public.center_fiscal_years;
 CREATE POLICY fiscal_owner_all ON public.center_fiscal_years FOR ALL TO authenticated
@@ -1953,16 +1953,15 @@ BEGIN
      AND (role = 'super_admin'
           OR (role = 'center_admin' AND public.accounting_enabled(center_id)));
   IF cid IS NULL THEN RAISE EXCEPTION 'not_allowed'; END IF;
-  IF EXISTS (SELECT 1 FROM public.center_fiscal_years WHERE center_id = cid AND year = p_year) THEN
+  IF EXISTS (SELECT 1 FROM public.center_fiscal_years WHERE center_id = cid AND fiscal_year = p_year) THEN
     RAISE EXCEPTION 'year_exists';
   END IF;
-  INSERT INTO public.center_fiscal_years(center_id, year, status, opening_balance)
+  INSERT INTO public.center_fiscal_years(center_id, fiscal_year, status, opening_balance)
   VALUES (cid, p_year, 'open',
     COALESCE((SELECT closing_balance FROM public.center_fiscal_years
-               WHERE center_id = cid AND status = 'closed' AND year < p_year
-               ORDER BY year DESC LIMIT 1), 0));
+               WHERE center_id = cid AND status = 'closed' AND fiscal_year < p_year
+               ORDER BY fiscal_year DESC LIMIT 1), 0));
 END; $$;
-GRANT EXECUTE ON FUNCTION public.open_fiscal_year(INT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.open_fiscal_year(INT) TO authenticated;
 
 -- إغلاق سنة: حساب الصافي + فتح السنة التالية بترحيل الرصيد تلقائياً
@@ -1978,7 +1977,7 @@ BEGIN
      AND (role = 'super_admin'
           OR (role = 'center_admin' AND public.accounting_enabled(center_id)));
   IF cid IS NULL THEN RAISE EXCEPTION 'not_allowed'; END IF;
-  SELECT * INTO v_row FROM public.center_fiscal_years WHERE center_id = cid AND year = p_year;
+  SELECT * INTO v_row FROM public.center_fiscal_years WHERE center_id = cid AND fiscal_year = p_year;
   IF NOT FOUND THEN RAISE EXCEPTION 'year_not_found'; END IF;
   IF v_row.status <> 'open' THEN RAISE EXCEPTION 'year_closed'; END IF;
   SELECT COALESCE(SUM(CASE kind WHEN 'income' THEN amount ELSE -amount END), 0) INTO v_net
@@ -1989,11 +1988,10 @@ BEGIN
      SET status = 'closed', closing_balance = v_net, closed_at = now(), closed_by = auth.uid()
    WHERE id = v_row.id;
   -- السنة التالية تُفتح تلقائياً برصيد مرحّل (وإن كانت موجودة يُحدَّث رصيد أول المدة)
-  INSERT INTO public.center_fiscal_years(center_id, year, status, opening_balance)
+  INSERT INTO public.center_fiscal_years(center_id, fiscal_year, status, opening_balance)
   VALUES (cid, p_year + 1, 'open', v_net)
-  ON CONFLICT (center_id, year) DO UPDATE SET opening_balance = EXCLUDED.opening_balance;
+  ON CONFLICT (center_id, fiscal_year) DO UPDATE SET opening_balance = EXCLUDED.opening_balance;
 END; $$;
-GRANT EXECUTE ON FUNCTION public.close_fiscal_year(INT) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.close_fiscal_year(INT) TO authenticated;
 
 -- ============================================================================
