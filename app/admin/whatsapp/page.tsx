@@ -72,7 +72,7 @@ export default function WhatsAppPage() {
     const dues = (await fetchDuesForStudent(s.id)).filter((d) => d.status !== 'paid');
     const total = dues.reduce((sum, d) => sum + Number(d.amount || 0), 0);
     const latest = dues[0];
-    setBody(duesReminderText(center?.name ?? 'Mr Center', s.name, latest ? `${arabicMonth(latest.month)} ${latest.year}` : 'مستحقات معلقة', total));
+    setBody(duesReminderText(center?.name ?? 'Mr Center', s.name, latest ? `${arabicMonth(latest.month)} ${latest.due_year}` : 'مستحقات معلقة', total));
   };
 
   return <>
