@@ -1918,8 +1918,6 @@ CREATE POLICY ledger_owner_all ON public.center_ledger FOR ALL TO authenticated
   USING (public.admin_owns_center(center_id) AND public.accounting_enabled(center_id))
   WITH CHECK (public.admin_owns_center(center_id) AND public.accounting_enabled(center_id));
 
-  WITH CHECK (public.admin_owns_center(center_id) AND public.accounting_enabled(center_id));
-
 -- السنوات المالية: فتح/إغلاق مع ترحيل الرصيد
 CREATE TABLE IF NOT EXISTS public.center_fiscal_years (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
