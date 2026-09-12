@@ -77,6 +77,7 @@ export interface Grade {
   center_id: string;
   name: string;
   academic_year: string;
+  sort_order: number;
   created_at: string;
 }
 

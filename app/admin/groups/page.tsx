@@ -5,8 +5,8 @@ import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader
 import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
-import { addGrade, deleteGroup, fetchGrades, fetchGroups, upsertGroup } from '@/lib/api';
-import type { BillingType, Grade, Group } from '@/lib/types';
+import { addGrade, deleteGrade, deleteGroup, fetchGrades, fetchGroups, fetchStudents, moveGrade, updateGrade, upsertGroup } from '@/lib/api';
+import type { BillingType, Grade, Group, Student } from '@/lib/types';
 import { isOwner, useTeacherGroupIds } from '@/lib/staff';
 import { WEEK_DAYS, arabicDay, billingLabel, formatDays, formatMoney } from '@/lib/utils';
 
@@ -21,7 +21,9 @@ export default function GroupsPage() {
   const centerId = profile?.center_id;
   const [groups, setGroups] = useState<Group[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
   const [newGrade, setNewGrade] = useState('');
+  const [editingGrade, setEditingGrade] = useState<{ id: string; name: string } | null>(null);
   const [form, setForm] = useState(initial);
   const [open, setOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -34,10 +36,31 @@ export default function GroupsPage() {
   const load = async () => {
     if (!centerId) return;
     setError(null);
-    try { const [g, gr] = await Promise.all([fetchGrades(centerId), fetchGroups(centerId)]); setGrades(g); setGroups(gr); }
+    try { const [g, gr, st] = await Promise.all([fetchGrades(centerId), fetchGroups(centerId), fetchStudents(centerId)]); setGrades(g); setGroups(gr); setStudents(st); }
     catch (err) { setError(err); }
   };
   useEffect(() => { void load(); }, [centerId]);
+
+  const gradeStudentCount = (id: string) => students.filter((s) => s.grade_id === id && s.status === 'active').length;
+  const gradeGroupCount = (id: string) => groups.filter((g) => g.grade_id === id).length;
+
+  const renameGrade = async () => {
+    if (!editingGrade || !editingGrade.name.trim()) return;
+    setError(null);
+    try { await updateGrade(editingGrade.id, editingGrade.name); setEditingGrade(null); await load(); toast.success('تم تعديل الصف'); }
+    catch (err) { setError(err); }
+  };
+
+  const removeGrade = async (id: string) => {
+    if (!confirm('حذف الصف سيفك ارتباطه بالمجموعات والطلاب. هل تريد المتابعة؟')) return;
+    setError(null);
+    try { await deleteGrade(id); await load(); toast.success('تم حذف الصف'); } catch (err) { setError(err); }
+  };
+
+  const shiftGrade = async (id: string, dir: -1 | 1) => {
+    setError(null);
+    try { await moveGrade(id, dir); await load(); } catch (err) { setError(err); }
+  };
 
   const change = (patch: Partial<typeof form>) => { setForm((f) => ({ ...f, ...patch })); setDirty(true); };
   const toggleDay = (day: string) => setForm((f) => ({ ...f, days: f.days.includes(day) ? f.days.filter((d) => d !== day) : [...f.days, day] }));
@@ -94,11 +117,33 @@ export default function GroupsPage() {
 
       <div className="grid grid-2">
         <Card className="stack">
-          <h2 className="h3">الصفوف</h2>
-          <div className="row"><Input label="صف جديد" value={newGrade} onChange={(e) => setNewGrade(e.target.value)} /><Button type="button" variant="secondary" onClick={createGrade}>إضافة صف</Button></div>
-          <div className="row">
-            {grades.length === 0 ? <span className="muted small">لا توجد صفوف</span> : grades.map((g) => <Badge key={g.id} tone="info">{g.name}</Badge>)}
-          </div>
+          <div className="row-between"><h2 className="h3">المراحل الدراسية</h2><Badge tone="info">{grades.length}</Badge></div>
+          <div className="row"><Input label="مرحلة جديدة" value={newGrade} onChange={(e) => setNewGrade(e.target.value)} placeholder="مثال: الصف الأول الثانوي" /><Button type="button" variant="secondary" onClick={createGrade}>إضافة</Button></div>
+          {grades.length === 0 ? <span className="muted small">لا توجد مراحل بعد</span> : (
+            <div className="stack" style={{ gap: 6 }}>
+              {grades.map((g, i) => (
+                <div key={g.id} className="card compact soft row-between">
+                  {editingGrade?.id === g.id ? (
+                    <div className="row" style={{ flex: 1 }}>
+                      <Input label="" value={editingGrade.name} onChange={(e) => setEditingGrade({ id: g.id, name: e.target.value })} />
+                      <Button type="button" variant="secondary" onClick={renameGrade}>حفظ</Button>
+                      <Button type="button" variant="ghost" onClick={() => setEditingGrade(null)}>إلغاء</Button>
+                    </div>
+                  ) : (
+                    <>
+                      <span><strong>{g.name}</strong> <span className="tiny muted">· {gradeStudentCount(g.id)} طالب · {gradeGroupCount(g.id)} مجموعة</span></span>
+                      {canManage ? <span className="row" style={{ gap: 4 }}>
+                        <Button type="button" variant="ghost" onClick={() => void shiftGrade(g.id, -1)} disabled={i === 0} title="أعلى">↑</Button>
+                        <Button type="button" variant="ghost" onClick={() => void shiftGrade(g.id, 1)} disabled={i === grades.length - 1} title="أسفل">↓</Button>
+                        <Button type="button" variant="ghost" onClick={() => setEditingGrade({ id: g.id, name: g.name })} title="تعديل">✎</Button>
+                        <Button type="button" variant="ghost" onClick={() => void removeGrade(g.id)} title="حذف">✕</Button>
+                      </span> : null}
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
           <Notice tone="warn">المدرس يُعيَّن للمجموعة من شاشة «فريق العمل» (تفعيل الحساب + إسناد المجموعات) — لا يُختار من هنا.</Notice>
         </Card>
 

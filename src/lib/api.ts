@@ -478,15 +478,17 @@ export async function fetchMyCenter(centerId: string): Promise<Center | null> {
 
 export async function fetchGrades(centerId: string): Promise<Grade[]> {
   const { data, error } = await getSupabase()
-    .from('grades').select('*').eq('center_id', centerId).order('created_at');
+    .from('grades').select('*').eq('center_id', centerId).order('sort_order').order('created_at');
   if (error) throw error;
   return (data ?? []) as Grade[];
 }
 
 export async function addGrade(centerId: string, name: string): Promise<void> {
+  const { data: rows } = await getSupabase().from('grades').select('sort_order').eq('center_id', centerId);
+  const nextOrder = rows?.length ? Math.max(0, ...rows.map((r) => Number(r.sort_order) || 0)) + 1 : 0;
   const { error } = await getSupabase().from('grades').insert({
     id: uuid(), center_id: centerId, name: name.trim(),
-    academic_year: '', created_at: nowIso(),
+    academic_year: '', sort_order: nextOrder, created_at: nowIso(),
   });
   if (error) throw error;
 }
@@ -505,6 +507,24 @@ export async function deleteGrade(id: string): Promise<void> {
 export async function updateGrade(id: string, name: string): Promise<void> {
   const { error } = await getSupabase().from('grades').update({ name: name.trim() }).eq('id', id);
   if (error) throw error;
+}
+
+/** تحريك صف لأعلى/أسفل ضمن ترتيب المراحل */
+export async function moveGrade(id: string, dir: -1 | 1): Promise<void> {
+  const sb = getSupabase();
+  const { data: current } = await sb.from('grades').select('center_id, sort_order').eq('id', id).maybeSingle();
+  if (!current) return;
+  const order = current.sort_order;
+  const cmp = dir < 0 ? 'lt' : 'gt';
+  const { data: neighbor } = await sb.from('grades')
+    .select('id, sort_order').eq('center_id', current.center_id)
+    .neq('id', id)
+    .filter('sort_order', cmp, order)
+    .order('sort_order', { ascending: dir < 0 })
+    .limit(1).maybeSingle();
+  if (!neighbor) return;
+  await sb.from('grades').update({ sort_order: neighbor.sort_order }).eq('id', id);
+  await sb.from('grades').update({ sort_order: order }).eq('id', neighbor.id);
 }
 
 export async function fetchGroups(centerId: string): Promise<Group[]> {
