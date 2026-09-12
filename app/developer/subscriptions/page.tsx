@@ -6,6 +6,7 @@ import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
 import { devFetchCenters, devFetchPendingRequests, devResolveRequest, devSetCenterStatus, devUpsertSubscription, logActivity, type CenterWithSub } from '@/lib/api';
 import { PRODUCTS, planLabel } from '@/lib/billing';
+import { ALERT_LABEL, devAuditUsage, devBlockCenter, devListUsageAlerts, devUnblockCenter, type UsageAlert } from '@/lib/features';
 import { getSupabase } from '@/lib/supabase';
 import type { PlanType, SubscriptionRequest } from '@/lib/types';
 import { formatDate, formatMoney, todayIso } from '@/lib/utils';
@@ -27,8 +28,39 @@ export default function DeveloperSubscriptionsPage() {
   const [extraDirty, setExtraDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [tab, setTab] = useState<'subs' | 'alerts'>('subs');
+  const [alerts, setAlerts] = useState<UsageAlert[]>([]);
+  const [alertsError, setAlertsError] = useState<unknown>(null);
+  const [auditing, setAuditing] = useState(false);
+  const [blocking, setBlocking] = useState<string | null>(null);
 
   const selectedCenter = useMemo(() => centers.find((c) => c.id === manual.centerId || c.id === extra.centerId), [centers, manual.centerId, extra.centerId]);
+
+  const loadAlerts = async () => {
+    setAlertsError(null);
+    try { setAlerts(await devListUsageAlerts()); } catch (err) { setAlertsError(err); }
+  };
+
+  const audit = async () => {
+    setAuditing(true); setAlertsError(null);
+    try { await devAuditUsage(); toast.success('اكتمل الفحص', 'تم تحديث التنبيهات تلقائياً (حُلّت المطابقة تلقائياً).'); await loadAlerts(); }
+    catch (err) { setAlertsError(err); }
+    finally { setAuditing(false); }
+  };
+
+  const block = async (id: string) => {
+    setBlocking(id); setAlertsError(null);
+    try { await devBlockCenter(id); await logActivity(id, 'center_blocked', 'حجب الحساب لتجاوز حدود الاشتراك'); toast.success('تم حجب الحساب', 'أُوقف السنتر والاشتراك وحُلّت التنبيهات.'); await loadAlerts(); }
+    catch (err) { setAlertsError(err); }
+    finally { setBlocking(null); }
+  };
+
+  const unblock = async (id: string) => {
+    setBlocking(id); setAlertsError(null);
+    try { await devUnblockCenter(id); await logActivity(id, 'center_unblocked', 'إلغاء حجب الحساب'); toast.success('أُلغي الحجب', 'عاد السنتر نشطاً.'); await loadAlerts(); }
+    catch (err) { setAlertsError(err); }
+    finally { setBlocking(null); }
+  };
 
   const load = async () => {
     try {
@@ -42,6 +74,7 @@ export default function DeveloperSubscriptionsPage() {
     } catch (err) { setError(err); }
   };
   useEffect(() => { void load(); }, []);
+  useEffect(() => { if (tab === 'alerts') void loadAlerts(); }, [tab]);
 
   const resolve = async (r: ReqRow, approve: boolean) => {
     setError(null);
@@ -114,12 +147,48 @@ export default function DeveloperSubscriptionsPage() {
 
   return <>
     <PageHeader
-      title="الاشتراكات"
-      subtitle="اعتماد طلبات الاشتراك، تفعيل يدوي، وزيادات فريق مؤقتة."
-      actions={<div className="row"><Button type="button" onClick={openManual}>+ اشتراك يدوي</Button><Button type="button" variant="secondary" onClick={openExtra}>+ زيادة حدود الفريق</Button></div>}
+      title="إدارة المشتركين"
+      subtitle="اعتماد الطلبات، التفعيل اليدوي، زيادات الفريق، وتنبيهات تجاوز حدود الاشتراك."
+      actions={tab === 'subs'
+        ? <div className="row"><Button type="button" onClick={openManual}>+ اشتراك يدوي</Button><Button type="button" variant="secondary" onClick={openExtra}>+ زيادة حدود الفريق</Button></div>
+        : <Button type="button" onClick={audit} disabled={auditing}>{auditing ? 'جارٍ الفحص...' : 'إعادة فحص التجاوزات'}</Button>}
     />
     <ErrorNotice error={error} />
-    <div className="grid grid-3">
+    <div className="tabs" style={{ marginBottom: 18 }}>
+      <button className={`tab ${tab === 'subs' ? 'active' : ''}`} onClick={() => setTab('subs')}>📋 الطلبات والاشتراكات</button>
+      <button className={`tab ${tab === 'alerts' ? 'active' : ''}`} onClick={() => setTab('alerts')}>⚠️ تنبيهات التجاوز</button>
+    </div>
+
+    {tab === 'alerts' ? (
+      <Card className="stack">
+        <div className="row-between"><h2 className="h3">تنبيهات تجاوز حدود الاشتراك</h2><Badge tone="info">{alerts.filter((a) => a.status === 'open').length} مفتوح</Badge></div>
+        <ErrorNotice error={alertsError} />
+        <Notice tone="info">التنبيه يبقى ظاهراً حتى يُحل تلقائياً (عودة الاستخدام للحدود) أو يحجب المطور الحساب. إن لم تظهر تنبيهات رغم وجود تجاوز، شغّل الترحيل supabase/20260912_entitlement_enforcement.sql ثم اضغط «إعادة فحص».</Notice>
+        {alerts.length === 0 ? <EmptyState title="لا توجد تنبيهات" body="اضغط «إعادة فحص التجاوزات» أعلى الصفحة لفحص كل السناتر." /> : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>السنتر</th><th>التجاوز</th><th>الاستخدام / الحد</th><th>الحالة</th><th>إجراء</th></tr></thead>
+              <tbody>
+                {alerts.map((a) => {
+                  const used = (a.detail as { used?: number })?.used ?? null;
+                  const limit = (a.detail as { limit?: number })?.limit ?? null;
+                  return (
+                    <tr key={a.id}>
+                      <td><strong>{a.center_name}</strong><div className="tiny muted" dir="ltr">{a.center_code}</div></td>
+                      <td>{a.title}<div className="tiny muted">{ALERT_LABEL[a.kind]}</div></td>
+                      <td>{used === null ? '—' : <strong style={{ color: 'var(--danger)' }}>{used}</strong>}{limit !== null && limit < 2147483647 ? ` / ${limit}` : ''}</td>
+                      <td><Badge tone={a.status === 'open' ? 'danger' : 'default'}>{a.status === 'open' ? 'مفتوح' : a.resolution === 'blocked' ? 'حُلّ بالحجب' : 'حُلّ تلقائياً'}</Badge></td>
+                      <td>{a.status === 'open' ? <Button type="button" variant="danger" disabled={blocking === a.center_id} onClick={() => void block(a.center_id)}>{blocking === a.center_id ? 'جارٍ الحجب...' : 'حجب الحساب'}</Button> : <Button type="button" variant="secondary" disabled={blocking === a.center_id} onClick={() => void unblock(a.center_id)}>إلغاء الحجب</Button>}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    ) : (
+      <div className="grid grid-3">
       <Card className="stack"><h2 className="h3">طلبات معلقة</h2>{rows.length === 0 ? <EmptyState title="لا توجد طلبات معلقة" /> : rows.map((r) => { const st = formatStatus(r.status); return <div key={r.id} className="card compact soft stack"><div className="row-between"><strong>{r.center_name ?? r.center_id}</strong><Badge tone={st.tone}>{st.text}</Badge></div><p className="muted small">{planLabel(r.plan)} · {r.months} شهر · {formatMoney(r.amount)} · تحويل {formatDate(r.transfer_at)}</p><div className="row"><Button type="button" onClick={() => void resolve(r, true)}>اعتماد وتفعيل</Button><Button type="button" variant="danger" onClick={() => void resolve(r, false)}>رفض</Button></div></div>; })}</Card>
       <Card className="stack">
         <h2 className="h3">اشتراك يدوي</h2>
@@ -130,6 +199,7 @@ export default function DeveloperSubscriptionsPage() {
         <Notice tone="info">اضغط «+ زيادة حدود الفريق» أعلى الصفحة لفتح نموذج منبثق للزيادة المؤقتة أو المفتوحة بلا نهاية.</Notice>
       </Card>
     </div>
+    )}
 
     <Modal
       open={manualOpen}
