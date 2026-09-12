@@ -1,0 +1,140 @@
+'use client';
+
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { useSession } from '@/context/session';
+import { planLabel } from '@/lib/billing';
+import { can, isOwner, isStaff, roleLabel } from '@/lib/rbac';
+import type { Profile, TeacherPermKey } from '@/lib/types';
+import { Badge, Button } from './ui';
+
+interface NavItem {
+  href: string;
+  label: string;
+  icon: string;
+  perm?: TeacherPermKey | null;
+  ownerOnly?: boolean;
+}
+
+const adminNav: NavItem[] = [
+  { href: '/admin', label: 'الرئيسية', icon: '⌂' },
+  { href: '/admin/students', label: 'الطلاب', icon: '👥' },
+  { href: '/admin/groups', label: 'المجموعات', icon: '🗂' },
+  { href: '/admin/attendance', label: 'الحضور', icon: '✓', perm: 'attendance' },
+  { href: '/admin/payments', label: 'المدفوعات', icon: '💳', perm: 'collect' },
+  { href: '/admin/grades', label: 'الدرجات', icon: '★', perm: 'grades' },
+  { href: '/admin/exams', label: 'الاختبارات', icon: '📝', perm: 'exams' },
+  { href: '/admin/surveys', label: 'الاستبيانات', icon: '📋', perm: 'surveys' },
+  { href: '/admin/library', label: 'المكتبة والشرف', icon: '📚', perm: 'honors' },
+  { href: '/admin/schedule', label: 'الجدول', icon: '🗓' },
+  { href: '/admin/reports', label: 'التقارير', icon: '📊', perm: 'reports' },
+  { href: '/admin/accounting', label: 'المحاسبة', icon: '💼', ownerOnly: true },
+  { href: '/admin/custody', label: 'العهدة', icon: '🧾' },
+  { href: '/admin/whatsapp', label: 'واتساب', icon: '☏', perm: 'notify' },
+  { href: '/admin/scan', label: 'ماسح QR', icon: '▣', perm: 'attendance' },
+  { href: '/admin/guide', label: 'الدليل', icon: '؟' },
+  { href: '/admin/announcements', label: 'الإعلانات', icon: '📣', perm: 'announcements' },
+  { href: '/admin/notifications', label: 'الإشعارات', icon: '🔔', perm: 'notify' },
+  { href: '/admin/dev-notices', label: 'تنبيهات المطور', icon: '🛡', ownerOnly: true },
+  { href: '/admin/inquiries', label: 'طلبات الطلاب', icon: '💬', perm: 'inquiries' },
+  { href: '/admin/settings', label: 'الإعدادات', icon: '⚙', ownerOnly: true },
+  { href: '/admin/activity', label: 'النشاط', icon: '≋', ownerOnly: true },
+  { href: '/admin/staff', label: 'فريق العمل', icon: '🧑‍🏫', ownerOnly: true },
+  { href: '/admin/subscription', label: 'الاشتراك', icon: '◆', ownerOnly: true },
+  { href: '/admin/support', label: 'الدعم', icon: '💬', ownerOnly: true },
+];
+
+const studentNav: NavItem[] = [
+  { href: '/student', label: 'الرئيسية', icon: '⌂' },
+  { href: '/student/attendance', label: 'حضوري', icon: '✓' },
+  { href: '/student/grades', label: 'درجاتي', icon: '★' },
+  { href: '/student/payments', label: 'مدفوعاتي', icon: '💳' },
+  { href: '/student/exams', label: 'اختباراتي', icon: '📝' },
+  { href: '/student/surveys', label: 'استبياناتي', icon: '📋' },
+  { href: '/student/library', label: 'المكتبة', icon: '📚' },
+  { href: '/student/schedule', label: 'جدولي', icon: '🗓' },
+  { href: '/student/notifications', label: 'إشعاراتي', icon: '🔔' },
+  { href: '/student/inquiries', label: 'طلباتي', icon: '💬' },
+  { href: '/student/profile', label: 'حسابي', icon: '👤' },
+];
+
+const devNav: NavItem[] = [
+  { href: '/developer', label: 'لوحة المطور', icon: '⌘' },
+  { href: '/developer/centers', label: 'السناتر', icon: '🏢' },
+  { href: '/developer/subscriptions', label: 'الاشتراكات', icon: '◆' },
+  { href: '/developer/broadcast', label: 'بث وإشعارات', icon: '📣' },
+  { href: '/developer/support', label: 'دعم العملاء', icon: '💬' },
+  { href: '/developer/app-info', label: 'حول التطبيق', icon: '⚙' },
+  { href: '/developer/connection', label: 'الاتصال', icon: '🔌' },
+];
+
+function visibleAdminNav(profile: Profile | null): NavItem[] {
+  return adminNav.filter((item) => {
+    if (!profile) return false;
+    if (item.ownerOnly) return isOwner(profile);
+    if (isStaff(profile) && item.perm) return can(profile, item.perm);
+    return true;
+  });
+}
+
+export function AppFrame({ area, children }: { area: 'admin' | 'student' | 'developer'; children: React.ReactNode }) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const { profile, subscription, signOut } = useSession();
+
+  const nav = area === 'admin' ? visibleAdminNav(profile) : area === 'student' ? studentNav : devNav;
+
+  const logout = async () => {
+    await signOut();
+    router.replace('/');
+  };
+
+  return (
+    <div className="app-shell">
+      <aside className="sidebar no-print">
+        <Link href="/" className="brand">
+          <div className="logo">MR</div>
+          <div>
+            <strong>Mr Center</strong>
+            <div className="tiny muted">Web Console</div>
+          </div>
+        </Link>
+
+        <div className="card compact soft stack" style={{ marginBottom: 16 }}>
+          <div className="row-between">
+            <div>
+              <strong>{profile?.full_name || 'مستخدم'}</strong>
+              <div className="tiny muted">{roleLabel(profile?.role ?? '')}</div>
+            </div>
+            {profile?.role === 'super_admin' ? <Badge tone="info">مطور</Badge> : null}
+          </div>
+          {subscription ? (
+            <div className="row">
+              <Badge tone={subscription.status === 'active' ? 'success' : 'warn'}>{planLabel(subscription.plan_type)}</Badge>
+              {typeof subscription.days_left === 'number' ? <span className="tiny muted">{subscription.days_left} يوم متبقي</span> : null}
+            </div>
+          ) : null}
+        </div>
+
+        <nav className="nav-section" aria-label="التنقل الرئيسي">
+          <p className="nav-title">القائمة</p>
+          {nav.map((item) => {
+            const active = pathname === item.href || (item.href !== `/${area}` && pathname.startsWith(item.href));
+            return (
+              <Link key={item.href} href={item.href} className={`nav-link ${active ? 'active' : ''}`}>
+                <span>{item.icon}</span>
+                <span>{item.label}</span>
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div style={{ marginTop: 24 }} className="stack">
+          <Link className="nav-link" href="/about"><span>؟</span><span>حول النظام</span></Link>
+          <Button variant="secondary" onClick={logout}>تسجيل الخروج</Button>
+        </div>
+      </aside>
+      <main className="main">{children}</main>
+    </div>
+  );
+}

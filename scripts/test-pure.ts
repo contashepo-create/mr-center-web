@@ -1,0 +1,100 @@
+import assert from 'node:assert/strict';
+import { PRODUCTS, limitsFor, planLabel, priceFor } from '../src/lib/billing';
+import { can, isOwner, isStaff, roleLabel } from '../src/lib/rbac';
+import type { Profile } from '../src/lib/types';
+import {
+  arabicDay,
+  arabicError,
+  compareVersions,
+  dbConfigFromRemote,
+  examMarksTotal,
+  findGroupConflicts,
+  formatDays,
+  isAllowedEmailDomain,
+  isManualExamType,
+  isValidCenterCode,
+  isValidEmail,
+  isValidHttpUrl,
+  isValidPhone,
+  isValidSignupEmail,
+  isValidSupabaseUrl,
+  minutesToTime24,
+  normalizeAnswerText,
+  normalizeCenterCode,
+  normalizePhone,
+  seededShuffle,
+  timeToMinutes,
+  validateExamDraft,
+} from '../src/lib/utils';
+import { decodeCenterQr, decodeStudentQr, encodeCenterQr, encodeStudentQr, fnv1aHex, isQrFresh } from '../src/lib/qr';
+import { toWaNumber, waLink } from '../src/lib/whatsapp';
+
+function profile(role: Profile['role'], perms: Profile['perms'] = {}, active = true): Profile {
+  return {
+    id: `${role}-id`, role, center_id: 'c1', student_id: role === 'student' ? 's1' : null,
+    full_name: 'Test', email: 'test@example.com', phone: '01000000000', is_active: active,
+    perms, created_at: new Date().toISOString(),
+  };
+}
+
+assert.equal(normalizePhone('٠١٠ 123-٤٥٦٧٨'), '01012345678');
+assert.equal(normalizeCenterCode(' ab 12 '), 'AB12');
+assert.equal(isValidCenterCode('ABC123'), true);
+assert.equal(isValidCenterCode('AB'), false);
+assert.equal(isValidEmail('a@b.com'), true);
+assert.equal(isAllowedEmailDomain('x@gmail.com'), true);
+assert.equal(isAllowedEmailDomain('x@temporary.invalid'), false);
+assert.equal(isValidSignupEmail('x@gmail.com'), true);
+assert.equal(isValidPhone('+201001112223'), true);
+assert.equal(isValidHttpUrl('https://example.com/a'), true);
+assert.equal(isValidHttpUrl('javascript:alert(1)'), false);
+assert.equal(isValidSupabaseUrl('https://abc.supabase.co'), true);
+assert.equal(arabicError(new Error('invalid_payment_amount')), 'أدخل مبلغ تحصيل صحيحاً أكبر من صفر');
+assert.equal(arabicError(new Error('due_not_found')), 'المستحق المحدد غير موجود أو لا تملك صلاحية تحصيله');
+assert.deepEqual(dbConfigFromRemote({ database: { url: 'https://abc.supabase.co', anon_key: 'anon' } }), { url: 'https://abc.supabase.co', anonKey: 'anon' });
+
+assert.equal(arabicDay('sat'), 'السبت');
+assert.equal(formatDays(['sat', 'mon']), 'السبت · الاثنين');
+assert.equal(timeToMinutes('09:30'), 570);
+assert.equal(minutesToTime24(570), '09:30');
+assert.equal(compareVersions('1.0.10', '1.0.2') > 0, true);
+assert.equal(normalizeAnswerText(' أإآةـ '), 'اااه');
+assert.equal(isManualExamType('essay'), true);
+assert.equal(examMarksTotal([{ marks: 2 }, { marks: 3 }]), 5);
+assert.equal(validateExamDraft([{ q: 'سؤال', type: 'mcq', choices: ['أ', 'ب', 'ج', 'د'], marks: 1 }]), null);
+assert.match(validateExamDraft([{ q: '', type: 'mcq', choices: ['أ', 'ب', 'ج', 'د'], marks: 1 }]) ?? '', /نص السؤال/);
+assert.deepEqual(seededShuffle(5, 'abc').sort(), [0, 1, 2, 3, 4]);
+assert.equal(findGroupConflicts([
+  { id: '1', name: 'أ', days: ['sat'], start_time: '09:00', end_time: '10:00' },
+  { id: '2', name: 'ب', days: ['sat'], start_time: '09:30', end_time: '11:00' },
+]).length, 1);
+
+assert.equal(planLabel('center_full'), 'سنتر شامل');
+assert.equal(priceFor('center_medium', 12), 4500);
+assert.equal(PRODUCTS.length >= 3, true);
+assert.deepEqual(limitsFor('solo', 'center_full'), { managers: 0, secretaries: 0, teachers: 0, maxStudents: 200 });
+
+const owner = profile('center_admin');
+const teacher = profile('teacher', { attendance: true });
+const disabledTeacher = profile('teacher', { attendance: true }, false);
+assert.equal(isOwner(owner), true);
+assert.equal(isStaff(teacher), true);
+assert.equal(can(owner, 'exams'), true);
+assert.equal(can(teacher, 'attendance'), true);
+assert.equal(can(teacher, 'exams'), false);
+assert.equal(can(disabledTeacher, 'attendance'), false);
+assert.equal(roleLabel('secretary'), 'سكرتير');
+
+const day = '2026-09-12';
+const studentQr = encodeStudentQr('center-1', 'student-1', day);
+assert.equal(isQrFresh(decodeStudentQr(studentQr), day), true);
+assert.deepEqual(decodeStudentQr(studentQr), { centerId: 'center-1', studentId: 'student-1', day });
+assert.equal(decodeStudentQr(studentQr + 'x'), null);
+const centerQr = encodeCenterQr('center-1', 'abc123', 'سنتر');
+assert.deepEqual(decodeCenterQr(centerQr), { centerId: 'center-1', code: 'ABC123', name: 'سنتر' });
+assert.equal(fnv1aHex('abc').length, 8);
+
+assert.equal(toWaNumber('01012345678'), '201012345678');
+assert.equal(waLink('01012345678', 'مرحبا')?.startsWith('https://wa.me/201012345678?text='), true);
+
+console.log('✅ pure logic tests passed');
