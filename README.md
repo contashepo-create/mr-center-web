@@ -176,10 +176,16 @@ supabase/android_multitenant_schema.sql
 
 ```txt
 supabase/android_multitenant_schema.sql          # المخطط الأساسي الكامل (شامل تكافؤ المحاسبة/الدعوات/المدير)
-supabase/20260912_fiscal_accounting.sql          # السنة المالية + المحاسبة + الاشتراكات + الزوار
-supabase/20260912_security.sql                   # السباقات + جلسة واحدة + منع الروبوتات
-supabase/20260912_parity_invites.sql             # (تكافؤ Android) بوابة المحاسبة الخادمية + دعوات الفريق + المدير الوحيد
-supabase/20260912_exams_complaints.sql           # محاولات الاختبارات المتعددة + طرق عرض النتيجة + قسم الشكاوي العام
+supabase/20260911_safe_production_migration.sql  # أعمدة الاشتراكات + دفتر الحسابات + المحصّل
+supabase/20260912_fiscal_accounting.sql          # السنة المالية + بوابة المحاسبة المدفوعة + الاشتراكات + الزوار
+supabase/20260912_security.sql                   # تحصيل ذري من السباق + جلسة واحدة + منع الروبوتات
+supabase/20260912_fix_year_columns.sql           # أعمدة السنوات الصحيحة + ربط الحضور بالحصص + دالة التحصيل
+supabase/20260912_entitlement_enforcement.sql    # فرض حدود الاشتراكات خادمياً + تنبيهات التجاوز + عزل المدرسين
+supabase/20260912_fiscal_accounting_gate.sql     # قفل المحاسبة غير المفعّلة على مستوى RLS/RPC
+supabase/20260912_exams_complaints.sql           # محاولات الاختبارات المتعددة + طرق عرض النتيجة + قسم الشكاوي
+supabase/20260912_survey_model.sql               # نموذج الاستبيان الكامل (أنواع أسئلة/جمهور/موعد/خصوصية)
+supabase/20260912_grade_order.sql                # ترتيب المراحل الدراسية يدوياً
+supabase/20260912_exam_ornaments_images.sql      # زخارف ورقة الاختبار + صور الأسئلة + إخفاء مفتاح التصحيح
 ```
 
 ---
