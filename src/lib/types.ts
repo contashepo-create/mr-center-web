@@ -314,12 +314,39 @@ export interface AppInquiry {
   updated_at: string;
 }
 
+export type SurveyQuestionType = 'single' | 'multi' | 'rating' | 'yesno' | 'text';
+export type SurveyAudience = 'all' | 'grade' | 'group';
+
+export interface SurveyQuestion {
+  id: string;
+  type: SurveyQuestionType;
+  title: string;
+  required?: boolean;
+  options?: string[];
+  maxRating?: number;
+  placeholder?: string;
+}
+
+export interface SurveyAnswer {
+  choice?: string[];
+  text?: string;
+  rating?: number;
+}
+
 export interface AppSurvey {
   id: string;
   center_id: string;
   title: string;
-  questions: string[];
+  description?: string;
+  audience: SurveyAudience;
+  grade_id: string | null;
+  group_ids: string[];
+  questions: SurveyQuestion[];
   is_active: boolean;
+  anonymous: boolean;
+  lock_after_submit: boolean;
+  deadline: string | null;
+  version: number;
   created_at: string;
 }
 
@@ -328,7 +355,7 @@ export interface AppSurveyResponse {
   center_id: string;
   survey_id: string;
   student_id: string;
-  answers: string[];
+  answers: Record<string, SurveyAnswer>;
   created_at: string;
 }
 

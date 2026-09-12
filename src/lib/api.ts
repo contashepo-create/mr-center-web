@@ -11,6 +11,7 @@ import type {
   Center, CenterLookup, CenterSettings, Due, ExamAttempt, Grade,
   ExamAnswer, ExamQuestion, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
   PublishedExam, SessionRecord, Student, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
+  SurveyAnswer, SurveyQuestion,
 } from './types';
 
 // ------------------------------------------------------------
@@ -1161,13 +1162,21 @@ export async function fetchActiveSurveys(centerId: string): Promise<AppSurvey[]>
 }
 
 export async function upsertSurvey(centerId: string, survey: Partial<AppSurvey> & {
-  title: string; questions: string[];
+  title: string; questions: SurveyQuestion[];
 }): Promise<void> {
   const payload = {
     center_id: centerId,
     title: survey.title.trim(),
-    questions: survey.questions.map((q) => q.trim()).filter(Boolean),
+    description: (survey.description ?? '').trim(),
+    questions: survey.questions,
+    audience: survey.audience ?? 'all',
+    grade_id: survey.audience === 'grade' ? survey.grade_id ?? null : null,
+    group_ids: survey.audience === 'group' ? survey.group_ids ?? [] : [],
     is_active: survey.is_active ?? true,
+    anonymous: survey.anonymous ?? false,
+    lock_after_submit: survey.lock_after_submit ?? false,
+    deadline: survey.deadline || null,
+    version: survey.version ?? 1,
   };
   if (survey.id) {
     const { error } = await getSupabase().from('app_surveys').update(payload).eq('id', survey.id);
@@ -1192,14 +1201,19 @@ export async function toggleSurvey(id: string, active: boolean): Promise<void> {
 }
 
 export async function submitSurveyResponse(input: {
-  centerId: string; surveyId: string; studentId: string; answers: string[];
+  centerId: string; surveyId: string; studentId: string; answers: Record<string, SurveyAnswer>;
+  lockAfterSubmit?: boolean;
 }): Promise<void> {
-  const { error } = await getSupabase().from('app_survey_responses').insert({
+  // ردّ واحد لكل طالب في كل استبيان: إن كان القفل مفعّلاً نرفض التكرار،
+  // وإلا نُحدّث ردّه السابق بدل إدراج صف ثانٍ.
+  const { error } = await getSupabase().from('app_survey_responses').upsert({
     id: uuid(), center_id: input.centerId, survey_id: input.surveyId,
     student_id: input.studentId, answers: input.answers,
-  });
+  }, { onConflict: 'survey_id,student_id' });
   if (error) {
-    if (String((error as any)?.message ?? '').includes('duplicate key')) throw new Error('already_answered');
+    if (input.lockAfterSubmit && String((error as any)?.message ?? '').includes('duplicate key')) {
+      throw new Error('already_answered');
+    }
     throw error;
   }
 }
