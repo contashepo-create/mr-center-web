@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader, Select, formatStatus } from '@/components/ui';
+import { Modal } from '@/components/modal';
+import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
 import { addGrade, deleteGroup, fetchGrades, fetchGroups, upsertGroup } from '@/lib/api';
 import type { BillingType, Grade, Group } from '@/lib/types';
@@ -15,14 +17,16 @@ const initial = {
 
 export default function GroupsPage() {
   const { profile } = useSession();
+  const toast = useToast();
   const centerId = profile?.center_id;
   const [groups, setGroups] = useState<Group[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
   const [newGrade, setNewGrade] = useState('');
   const [form, setForm] = useState(initial);
+  const [open, setOpen] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const teacherScope = useTeacherGroupIds();
   const canManage = isOwner(profile);
   const visibleGroups = useMemo(() => teacherScope ? groups.filter((g) => teacherScope.includes(g.id)) : groups, [groups, teacherScope]);
@@ -35,16 +39,21 @@ export default function GroupsPage() {
   };
   useEffect(() => { void load(); }, [centerId]);
 
+  const change = (patch: Partial<typeof form>) => { setForm((f) => ({ ...f, ...patch })); setDirty(true); };
   const toggleDay = (day: string) => setForm((f) => ({ ...f, days: f.days.includes(day) ? f.days.filter((d) => d !== day) : [...f.days, day] }));
-  const edit = (g: Group) => setForm({
-    id: g.id, name: g.name, teacher_name: g.teacher_name ?? '', teacher_phone: g.teacher_phone ?? '', grade_id: g.grade_id ?? '',
-    start_time: g.start_time ?? '', end_time: g.end_time ?? '', monthly_fee: String(g.monthly_fee ?? 0),
-    billing_type: g.billing_type ?? 'monthly', weekly_price: String(g.weekly_price ?? 0), session_price: String(g.session_price ?? 0), days: g.days ?? [],
-  });
+  const addNew = () => { setForm(initial); setDirty(false); setError(null); setOpen(true); };
+  const edit = (g: Group) => {
+    setForm({
+      id: g.id, name: g.name, teacher_name: g.teacher_name ?? '', teacher_phone: g.teacher_phone ?? '', grade_id: g.grade_id ?? '',
+      start_time: g.start_time ?? '', end_time: g.end_time ?? '', monthly_fee: String(g.monthly_fee ?? 0),
+      billing_type: g.billing_type ?? 'monthly', weekly_price: String(g.weekly_price ?? 0), session_price: String(g.session_price ?? 0), days: g.days ?? [],
+    });
+    setDirty(false); setError(null); setOpen(true);
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault(); if (!centerId) return;
-    setBusy(true); setError(null); setMessage(null);
+    setBusy(true); setError(null);
     try {
       await upsertGroup(centerId, {
         id: form.id || undefined,
@@ -60,7 +69,8 @@ export default function GroupsPage() {
         weekly_price: Number(form.weekly_price) || 0,
         session_price: Number(form.session_price) || 0,
       });
-      setForm(initial); setMessage(form.id ? 'تم تحديث المجموعة.' : 'تم إنشاء المجموعة.'); await load();
+      toast.success(form.id ? 'تم تحديث المجموعة' : 'تم إنشاء المجموعة', form.name);
+      setForm(initial); setDirty(false); setOpen(false); await load();
     } catch (err) { setError(err); }
     finally { setBusy(false); }
   };
@@ -68,62 +78,31 @@ export default function GroupsPage() {
   const createGrade = async () => {
     if (!centerId || !newGrade.trim()) return;
     setError(null);
-    try { await addGrade(centerId, newGrade); setNewGrade(''); await load(); }
+    try { await addGrade(centerId, newGrade); setNewGrade(''); await load(); toast.success('تمت إضافة الصف', newGrade); }
     catch (err) { setError(err); }
   };
 
   const removeGroup = async (id: string) => {
     if (!confirm('حذف المجموعة سيفك ارتباطها من الطلاب. هل تريد المتابعة؟')) return;
-    setError(null); try { await deleteGroup(id); await load(); } catch (err) { setError(err); }
+    setError(null); try { await deleteGroup(id); await load(); toast.success('تم حذف المجموعة'); } catch (err) { setError(err); }
   };
 
   return (
     <>
-      <PageHeader title="المجموعات والصفوف" subtitle="إدارة صفوف ومجموعات السنتر بنفس الجداول المستخدمة في التطبيق." />
+      <PageHeader title="المجموعات والصفوف" subtitle="إدارة صفوف ومجموعات السنتر بنفس الجداول المستخدمة في التطبيق." actions={canManage ? <Button type="button" onClick={addNew}>+ إضافة مجموعة</Button> : undefined} />
       <ErrorNotice error={error} />
-      {message ? <Notice tone="success">{message}</Notice> : null}
 
       <div className="grid grid-2">
-        {canManage ? <>
-        <Card className="stack">
-          <h2 className="h3">{form.id ? 'تعديل مجموعة' : 'إضافة مجموعة'}</h2>
-          <form className="stack" onSubmit={submit}>
-            <Notice tone="warn">المدرس يُعيَّن للمجموعة من شاشة «فريق العمل» (تفعيل الحساب + إسناد المجموعات) — لا يُختار من هنا.</Notice>
-            <div className="grid grid-2">
-              <Input label="اسم المجموعة" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
-              <Select label="الصف" value={form.grade_id} onChange={(e) => setForm({ ...form, grade_id: e.target.value })}>
-                <option value="">بدون</option>
-                {grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
-              </Select>
-              <Input label="بداية الحصة" type="time" value={form.start_time} onChange={(e) => setForm({ ...form, start_time: e.target.value })} />
-              <Input label="نهاية الحصة" type="time" value={form.end_time} onChange={(e) => setForm({ ...form, end_time: e.target.value })} />
-              <Select label="نظام الدفع" value={form.billing_type} onChange={(e) => setForm({ ...form, billing_type: e.target.value })}>
-                <option value="monthly">شهري</option>
-                <option value="weekly">أسبوعي</option>
-                <option value="per_session">بالحصة</option>
-              </Select>
-              <Input label="السعر الشهري" type="number" value={form.monthly_fee} onChange={(e) => setForm({ ...form, monthly_fee: e.target.value })} />
-              <Input label="السعر الأسبوعي" type="number" value={form.weekly_price} onChange={(e) => setForm({ ...form, weekly_price: e.target.value })} />
-              <Input label="سعر الحصة" type="number" value={form.session_price} onChange={(e) => setForm({ ...form, session_price: e.target.value })} />
-            </div>
-            <div className="stack">
-              <span className="label">الأيام</span>
-              <div className="row">
-                {WEEK_DAYS.map((day) => <button className={`tab ${form.days.includes(day) ? 'active' : ''}`} type="button" key={day} onClick={() => toggleDay(day)}>{arabicDay(day)}</button>)}
-              </div>
-            </div>
-            <div className="row"><Button disabled={busy} type="submit">{busy ? 'جاري الحفظ...' : 'حفظ المجموعة'}</Button>{form.id ? <Button type="button" variant="secondary" onClick={() => setForm(initial)}>إلغاء</Button> : null}</div>
-          </form>
-        </Card>
-
         <Card className="stack">
           <h2 className="h3">الصفوف</h2>
           <div className="row"><Input label="صف جديد" value={newGrade} onChange={(e) => setNewGrade(e.target.value)} /><Button type="button" variant="secondary" onClick={createGrade}>إضافة صف</Button></div>
           <div className="row">
             {grades.length === 0 ? <span className="muted small">لا توجد صفوف</span> : grades.map((g) => <Badge key={g.id} tone="info">{g.name}</Badge>)}
           </div>
+          <Notice tone="warn">المدرس يُعيَّن للمجموعة من شاشة «فريق العمل» (تفعيل الحساب + إسناد المجموعات) — لا يُختار من هنا.</Notice>
         </Card>
-        </> : <Card className="stack"><h2 className="h3">عرض المجموعات</h2><Notice>حساب فريق العمل يشاهد المجموعات المسندة له فقط؛ إنشاء وتعديل الصفوف والمجموعات لصاحب السنتر.</Notice></Card>}
+
+        {!canManage ? <Card className="stack"><h2 className="h3">عرض المجموعات</h2><Notice>حساب فريق العمل يشاهد المجموعات المسندة له فقط؛ إنشاء وتعديل الصفوف والمجموعات لصاحب السنتر.</Notice></Card> : <Card className="stack"><h2 className="h3">إدارة المجموعات</h2><div className="notice">اضغط «+ إضافة مجموعة» أعلى الصفحة أو «تعديل» بجوار أي مجموعة في القائمة بالأسفل — سيُفتح نموذج منبثق لا يُغلق بالخطأ إلا بعد حفظ أو تجاهل تعديلاتك.</div></Card>}
       </div>
 
       <Card className="stack" style={{ marginTop: 18 }}>
@@ -145,6 +124,47 @@ export default function GroupsPage() {
           </tbody></table></div>
         )}
       </Card>
+
+      {canManage ? (
+        <Modal
+          open={open}
+          title={form.id ? 'تعديل مجموعة' : 'إضافة مجموعة'}
+          subtitle={form.name || 'بيانات المجموعة الجديدة'}
+          dirty={dirty}
+          onClose={() => setOpen(false)}
+          onSave={() => void submit({ preventDefault: () => {} } as React.FormEvent)}
+          saveLabel={busy ? 'جاري الحفظ...' : 'حفظ المجموعة'}
+          wide
+          footer={<Button disabled={busy} type="submit" form="group-form">{busy ? 'جاري الحفظ...' : 'حفظ المجموعة'}</Button>}
+        >
+          <form id="group-form" className="stack" onSubmit={submit}>
+            <div className="grid grid-2">
+              <Input label="اسم المجموعة" value={form.name} onChange={(e) => change({ name: e.target.value })} required />
+              <Select label="الصف" value={form.grade_id} onChange={(e) => change({ grade_id: e.target.value })}>
+                <option value="">بدون</option>
+                {grades.map((g) => <option key={g.id} value={g.id}>{g.name}</option>)}
+              </Select>
+              <Input label="بداية الحصة" type="time" value={form.start_time} onChange={(e) => change({ start_time: e.target.value })} />
+              <Input label="نهاية الحصة" type="time" value={form.end_time} onChange={(e) => change({ end_time: e.target.value })} />
+              <Select label="نظام الدفع" value={form.billing_type} onChange={(e) => change({ billing_type: e.target.value })}>
+                <option value="monthly">شهري</option>
+                <option value="weekly">أسبوعي</option>
+                <option value="per_session">بالحصة</option>
+              </Select>
+              <Input label="السعر الشهري" type="number" value={form.monthly_fee} onChange={(e) => change({ monthly_fee: e.target.value })} />
+              <Input label="السعر الأسبوعي" type="number" value={form.weekly_price} onChange={(e) => change({ weekly_price: e.target.value })} />
+              <Input label="سعر الحصة" type="number" value={form.session_price} onChange={(e) => change({ session_price: e.target.value })} />
+            </div>
+            <div className="stack">
+              <span className="label">الأيام</span>
+              <div className="row">
+                {WEEK_DAYS.map((day) => <button className={`tab ${form.days.includes(day) ? 'active' : ''}`} type="button" key={day} onClick={() => toggleDay(day)}>{arabicDay(day)}</button>)}
+              </div>
+            </div>
+            <ErrorNotice error={error} />
+          </form>
+        </Modal>
+      ) : null}
     </>
   );
 }

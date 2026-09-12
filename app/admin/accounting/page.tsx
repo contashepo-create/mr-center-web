@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader, Select } from '@/components/ui';
+import { Modal } from '@/components/modal';
+import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
 import { closeFiscalYear, fetchMyFiscalYears, requestAccounting, type FiscalYear } from '@/lib/features';
 import { isOwner, roleLabel } from '@/lib/rbac';
@@ -81,6 +83,7 @@ function AccountingUpsell({ centerId }: { centerId: string }) {
 
 export default function AccountingPage() {
   const { profile, features } = useSession();
+  const toast = useToast();
   const centerId = profile?.center_id;
   const [rows, setRows] = useState<Ledger[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
@@ -92,9 +95,12 @@ export default function AccountingPage() {
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
   const [commission, setCommission] = useState({ staff_id: '', rate: '3', starts_on: todayIso(), ends_on: '', is_active: true });
+  const [expenseOpen, setExpenseOpen] = useState(false);
+  const [expenseDirty, setExpenseDirty] = useState(false);
+  const [commissionOpen, setCommissionOpen] = useState(false);
+  const [commissionDirty, setCommissionDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const [message, setMessage] = useState<string | null>(null);
 
   const staffName = useMemo(() => new Map(staff.map((s) => [s.id, s.full_name])), [staff]);
   const filteredRows = useMemo(() => rows.filter((r) => (!fromDate || r.occurred_on >= fromDate) && (!toDate || r.occurred_on <= toDate)), [rows, fromDate, toDate]);
@@ -179,7 +185,7 @@ export default function AccountingPage() {
     const deduction = Math.max(0, Number(form.deduction) || 0);
     if (!form.category.trim() || !amount || amount <= 0) return setError(new Error('أدخل التصنيف والمبلغ الصحيح'));
     if (['salary', 'advance', 'bonus'].includes(form.entry_type) && !form.employee_id) return setError(new Error('اختر الموظف للحركات المرتبطة بالراتب أو السلفة أو المكافأة'));
-    setBusy(true); setError(null); setMessage(null);
+    setBusy(true); setError(null);
     try {
       const { error } = await getSupabase().from('center_ledger').insert({
         center_id: centerId,
@@ -198,7 +204,8 @@ export default function AccountingPage() {
       });
       if (error) throw error;
       setForm({ entry_type: 'general', employee_id: '', category: '', description: '', amount: '', deduction: '0', occurred_on: todayIso() });
-      setMessage('تم تسجيل المصروف. إيرادات الطلاب تسجل آلياً فقط من قسم التحصيل لمنع ازدواج الإيراد.');
+      setExpenseDirty(false); setExpenseOpen(false);
+      toast.success('تم تسجيل المصروف', 'إيرادات الطلاب تسجل آلياً فقط من قسم التحصيل لمنع ازدواج الإيراد.');
       await load();
     } catch (err) { setError(err); }
     finally { setBusy(false); }
@@ -209,7 +216,7 @@ export default function AccountingPage() {
     if (!centerId || !commission.staff_id) return;
     const rate = Number(commission.rate);
     if (Number.isNaN(rate) || rate < 0 || rate > 100) return setError(new Error('نسبة العمولة يجب أن تكون بين 0 و 100'));
-    setError(null); setMessage(null);
+    setError(null);
     try {
       const { error } = await getSupabase().from('staff_commission_rules').upsert({
         center_id: centerId,
@@ -220,7 +227,8 @@ export default function AccountingPage() {
         is_active: commission.is_active,
       }, { onConflict: 'center_id,staff_id' });
       if (error) throw error;
-      setMessage('تم حفظ نسبة العمولة.');
+      setCommissionDirty(false); setCommissionOpen(false);
+      toast.success('تم حفظ نسبة العمولة');
       await load();
     } catch (err) { setError(err); }
   };
@@ -237,7 +245,7 @@ export default function AccountingPage() {
 
   return <>
     <PageHeader title="المحاسبة" subtitle="دفتر مالي: إيرادات التحصيل آلية، والمصروفات/الرواتب/السلف يضيفها صاحب السنتر فقط." actions={<Button type="button" variant="secondary" onClick={printFinancial}>طباعة تقرير مالي</Button>} />
-    <ErrorNotice error={error} />{message ? <Notice tone="success">{message}</Notice> : null}
+    <ErrorNotice error={error} />
     {yearMsg ? <Notice tone="success">{yearMsg}</Notice> : null}
     <Card className="stack" style={{ marginBottom: 18 }}>
       <div className="row-between">
@@ -272,12 +280,58 @@ export default function AccountingPage() {
     <div className="grid grid-4" style={{ marginBottom: 18 }}><Card className="compact kpi"><span className="muted">الإيرادات</span><div className="kpi-value">{formatMoney(totals.income)}</div></Card><Card className="compact kpi"><span className="muted">المصروفات</span><div className="kpi-value">{formatMoney(totals.expense)}</div></Card><Card className="compact kpi"><span className="muted">الصافي</span><div className="kpi-value">{formatMoney(totals.income - totals.expense)}</div></Card><Card className="compact kpi"><span className="muted">حركات الفترة</span><div className="kpi-value">{filteredRows.length}</div></Card></div>
     <div className="grid grid-2">
       <Card className="stack"><h2 className="h3">فلترة الفترة</h2><div className="grid grid-2"><Input label="من تاريخ" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /><Input label="إلى تاريخ" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></div><Notice>مصدر الإيراد الوحيد هو `payment_collection` الناتج تلقائياً من دفعات الطلاب؛ هذا يمنع تكرار الإيرادات محاسبياً.</Notice></Card>
-      <Card className="stack"><h2 className="h3">مصروف جديد</h2><form className="stack" onSubmit={submit}><div className="grid grid-2"><Select label="نوع المصروف" value={form.entry_type} onChange={(e) => setForm({ ...form, entry_type: e.target.value as EntryType })}>{EXPENSE_TYPES.map((t) => <option key={t} value={t}>{ENTRY_LABEL[t]}</option>)}</Select>{['salary', 'advance', 'bonus'].includes(form.entry_type) ? <Select label="الموظف" value={form.employee_id} onChange={(e) => setForm({ ...form, employee_id: e.target.value })}><option value="">اختر الموظف</option>{staff.map((s) => <option key={s.id} value={s.id}>{s.full_name} — {roleLabel(s.role)}</option>)}</Select> : null}<Input label="التصنيف" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} required /><Input label="المبلغ" type="number" value={form.amount} onChange={(e) => setForm({ ...form, amount: e.target.value })} required /><Input label="خصم من المستحق" type="number" value={form.deduction} onChange={(e) => setForm({ ...form, deduction: e.target.value })} /><Input label="التاريخ" type="date" value={form.occurred_on} onChange={(e) => setForm({ ...form, occurred_on: e.target.value })} /></div><Input label="الوصف" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /><Button disabled={busy} type="submit">{busy ? 'جاري الحفظ...' : 'حفظ المصروف'}</Button></form></Card>
+      <Card className="stack"><h2 className="h3">مصروف جديد</h2><div className="notice">اضغط الزر بالأسفل لفتح نموذج منبثق لتسجيل مصروف أو راتب أو سلفة أو مكافأة.</div><Button type="button" onClick={() => { setExpenseDirty(false); setError(null); setExpenseOpen(true); }}>+ تسجيل مصروف</Button></Card>
     </div>
     <div className="grid grid-2" style={{ marginTop: 18 }}>
-      <Card className="stack"><h2 className="h3">عمولات التحصيل</h2><form className="stack" onSubmit={saveCommission}><div className="grid grid-2"><Select label="الموظف" value={commission.staff_id} onChange={(e) => setCommission({ ...commission, staff_id: e.target.value })}><option value="">اختر الموظف</option>{staff.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}</Select><Input label="النسبة %" type="number" value={commission.rate} onChange={(e) => setCommission({ ...commission, rate: e.target.value })} /><Input label="تبدأ من" type="date" value={commission.starts_on} onChange={(e) => setCommission({ ...commission, starts_on: e.target.value })} /><Input label="تنتهي في" type="date" value={commission.ends_on} onChange={(e) => setCommission({ ...commission, ends_on: e.target.value })} /></div><label className="row small muted"><input type="checkbox" checked={commission.is_active} onChange={(e) => setCommission({ ...commission, is_active: e.target.checked })} /> العمولة مفعلة</label><Button type="submit" variant="secondary">حفظ العمولة</Button></form>{collectorTotals.length === 0 ? <EmptyState title="لا يوجد تحصيل موظفين في الفترة" /> : collectorTotals.map((c) => <div key={c.id} className="row-between card compact soft"><span>{c.name}</span><span>{formatMoney(c.total)}</span><Badge tone="success">عمولة {formatMoney(c.commission)} · {c.rate}%</Badge></div>)}</Card>
+      <Card className="stack"><div className="row-between"><h2 className="h3">عمولات التحصيل</h2><Button type="button" variant="secondary" onClick={() => { setCommissionDirty(false); setError(null); setCommissionOpen(true); }}>+ قاعدة عمولة</Button></div>{collectorTotals.length === 0 ? <EmptyState title="لا يوجد تحصيل موظفين في الفترة" /> : collectorTotals.map((c) => <div key={c.id} className="row-between card compact soft"><span>{c.name}</span><span>{formatMoney(c.total)}</span><Badge tone="success">عمولة {formatMoney(c.commission)} · {c.rate}%</Badge></div>)}</Card>
       <Card className="stack"><h2 className="h3">كشف الرواتب والسلفيات</h2>{payroll.length === 0 ? <EmptyState title="لا توجد حركات رواتب في الفترة" /> : payroll.map((p) => <div key={p.id} className="card compact soft stack"><div className="row-between"><strong>{p.full_name}</strong><Badge>{roleLabel(p.role)}</Badge></div><p className="muted small">راتب: {formatMoney(p.salary)} · سلف: {formatMoney(p.advance)} · مكافآت/عمولات: {formatMoney(p.bonus)} · خصومات: {formatMoney(p.deduction)}</p><div className="row-between"><strong>الصافي: {formatMoney(p.net)}</strong><Button type="button" variant="secondary" onClick={() => printPayroll(p)}>كشف راتب PDF</Button></div></div>)}</Card>
     </div>
     <Card className="stack" style={{ marginTop: 18 }}><div className="row-between"><h2 className="h3">سجل الحركات</h2><Badge tone="info">{filteredRows.length}</Badge></div>{filteredRows.length === 0 ? <EmptyState title="لا توجد حركات" /> : <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>الموظف/المنفذ</th><th>المبلغ</th><th>المصدر</th></tr></thead><tbody>{filteredRows.map((r) => <tr key={r.id}><td>{formatDate(r.occurred_on)}</td><td><Badge tone={r.kind === 'income' ? 'success' : 'warn'}>{r.kind === 'income' ? 'إيراد' : 'مصروف'}</Badge></td><td>{ENTRY_LABEL[r.entry_type] ?? r.entry_type}<div className="tiny muted">{r.category}{r.description ? ` — ${r.description}` : ''}</div></td><td>{staffName.get(r.employee_id ?? '') ?? r.created_by_name ?? '—'}</td><td>{formatMoney(r.amount)}</td><td>{r.source_payment_id ? 'دفعة طالب' : 'يدوي'}</td></tr>)}</tbody></table></div>}</Card>
+    <Modal
+      open={expenseOpen}
+      title="تسجيل مصروف"
+      subtitle="مصروف عام / راتب / سلفة / مكافأة"
+      dirty={expenseDirty}
+      onClose={() => setExpenseOpen(false)}
+      onSave={() => void submit({ preventDefault: () => {} } as React.FormEvent)}
+      saveLabel={busy ? 'جاري الحفظ...' : 'حفظ المصروف'}
+      footer={<Button disabled={busy} type="submit" form="expense-form">{busy ? 'جاري الحفظ...' : 'حفظ المصروف'}</Button>}
+    >
+      <form id="expense-form" className="stack" onSubmit={submit}>
+        <div className="grid grid-2">
+          <Select label="نوع المصروف" value={form.entry_type} onChange={(e) => { setForm({ ...form, entry_type: e.target.value as EntryType }); setExpenseDirty(true); }}>{EXPENSE_TYPES.map((t) => <option key={t} value={t}>{ENTRY_LABEL[t]}</option>)}</Select>
+          {['salary', 'advance', 'bonus'].includes(form.entry_type) ? <Select label="الموظف" value={form.employee_id} onChange={(e) => { setForm({ ...form, employee_id: e.target.value }); setExpenseDirty(true); }}><option value="">اختر الموظف</option>{staff.map((s) => <option key={s.id} value={s.id}>{s.full_name} — {roleLabel(s.role)}</option>)}</Select> : null}
+          <Input label="التصنيف" value={form.category} onChange={(e) => { setForm({ ...form, category: e.target.value }); setExpenseDirty(true); }} required />
+          <Input label="المبلغ" type="number" value={form.amount} onChange={(e) => { setForm({ ...form, amount: e.target.value }); setExpenseDirty(true); }} required />
+          <Input label="خصم من المستحق" type="number" value={form.deduction} onChange={(e) => { setForm({ ...form, deduction: e.target.value }); setExpenseDirty(true); }} />
+          <Input label="التاريخ" type="date" value={form.occurred_on} onChange={(e) => { setForm({ ...form, occurred_on: e.target.value }); setExpenseDirty(true); }} />
+        </div>
+        <Input label="الوصف" value={form.description} onChange={(e) => { setForm({ ...form, description: e.target.value }); setExpenseDirty(true); }} />
+        <Notice>إيرادات الطلاب تسجل آلياً فقط من قسم التحصيل لمنع ازدواج الإيراد.</Notice>
+        <ErrorNotice error={error} />
+      </form>
+    </Modal>
+
+    <Modal
+      open={commissionOpen}
+      title="قاعدة عمولة تحصيل"
+      subtitle="نسبة يحصل عليها الموظف من تحصيله"
+      dirty={commissionDirty}
+      onClose={() => setCommissionOpen(false)}
+      onSave={() => void saveCommission({ preventDefault: () => {} } as React.FormEvent)}
+      saveLabel="حفظ العمولة"
+      footer={<Button type="submit" form="commission-form">حفظ العمولة</Button>}
+    >
+      <form id="commission-form" className="stack" onSubmit={saveCommission}>
+        <div className="grid grid-2">
+          <Select label="الموظف" value={commission.staff_id} onChange={(e) => { setCommission({ ...commission, staff_id: e.target.value }); setCommissionDirty(true); }}><option value="">اختر الموظف</option>{staff.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}</Select>
+          <Input label="النسبة %" type="number" value={commission.rate} onChange={(e) => { setCommission({ ...commission, rate: e.target.value }); setCommissionDirty(true); }} />
+          <Input label="تبدأ من" type="date" value={commission.starts_on} onChange={(e) => { setCommission({ ...commission, starts_on: e.target.value }); setCommissionDirty(true); }} />
+          <Input label="تنتهي في" type="date" value={commission.ends_on} onChange={(e) => { setCommission({ ...commission, ends_on: e.target.value }); setCommissionDirty(true); }} />
+        </div>
+        <label className="row small muted"><input type="checkbox" checked={commission.is_active} onChange={(e) => { setCommission({ ...commission, is_active: e.target.checked }); setCommissionDirty(true); }} /> العمولة مفعلة</label>
+        <ErrorNotice error={error} />
+      </form>
+    </Modal>
   </>;
 }

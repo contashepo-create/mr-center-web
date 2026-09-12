@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Badge, Button, Card, ErrorNotice, Input, Notice, PageHeader } from '@/components/ui';
+import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
 import { fetchCenterSettings, fetchMyCenter, saveCenterSettings } from '@/lib/api';
@@ -24,6 +25,8 @@ export default function AdminSettingsPage() {
   const [yearMsg, setYearMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsDirty, setSettingsDirty] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
   useEffect(() => {
@@ -44,7 +47,7 @@ export default function AdminSettingsPage() {
     e.preventDefault();
     if (!centerId) return;
     setBusy(true); setError(null);
-    try { await saveCenterSettings(centerId, settings); toast.success('تم حفظ الإعدادات', 'حُفظت إعدادات السنتر بنجاح.'); }
+    try { await saveCenterSettings(centerId, settings); toast.success('تم حفظ الإعدادات', 'حُفظت إعدادات السنتر بنجاح.'); setSettingsDirty(false); setSettingsOpen(false); }
     catch (err) { setError(err); }
     finally { setBusy(false); }
   };
@@ -98,13 +101,13 @@ export default function AdminSettingsPage() {
       </Card>
       <Card className="stack">
         <h2 className="h3">الإعدادات التشغيلية</h2>
-        <form className="stack" onSubmit={save}>
-          <Input label="واتساب السنتر" value={settings.whatsapp} onChange={(e) => setSettings({ ...settings, whatsapp: e.target.value })} dir="ltr" />
-          <Input label="بريد التواصل" value={settings.contact_email} onChange={(e) => setSettings({ ...settings, contact_email: e.target.value })} dir="ltr" />
-          <Input label="السنة/الأرشيف" value={settings.archive_year} onChange={(e) => setSettings({ ...settings, archive_year: e.target.value })} />
-          <label className="row small muted"><input type="checkbox" checked={settings.registration_open} onChange={(e) => setSettings({ ...settings, registration_open: e.target.checked })} /> التسجيل مفتوح للطلاب</label>
-          <Button disabled={busy} type="submit">حفظ الإعدادات</Button>
-        </form>
+        <div className="grid grid-2">
+          <Card className="compact soft kpi"><span className="muted">واتساب</span><div className="kpi-value" style={{ fontSize: '1rem' }} dir="ltr">{settings.whatsapp || '—'}</div></Card>
+          <Card className="compact soft kpi"><span className="muted">بريد التواصل</span><div className="kpi-value" style={{ fontSize: '1rem' }} dir="ltr">{settings.contact_email || '—'}</div></Card>
+          <Card className="compact soft kpi"><span className="muted">السنة/الأرشيف</span><div className="kpi-value" style={{ fontSize: '1rem' }}>{settings.archive_year || '—'}</div></Card>
+          <Card className="compact soft kpi"><span className="muted">التسجيل</span><div className="kpi-value" style={{ fontSize: '1rem' }}>{settings.registration_open ? 'مفتوح' : 'مغلق'}</div></Card>
+        </div>
+        <Button type="button" onClick={() => { setSettingsDirty(false); setError(null); setSettingsOpen(true); }}>تعديل الإعدادات</Button>
       </Card>
     </div>
     <Card className="stack" style={{ marginTop: 18 }}>
@@ -138,5 +141,24 @@ export default function AdminSettingsPage() {
         </div>
       )}
     </Card>
+
+    <Modal
+      open={settingsOpen}
+      title="الإعدادات التشغيلية"
+      subtitle="واتساب وبريد التواصل وأرشيف السنة وحالة التسجيل"
+      dirty={settingsDirty}
+      onClose={() => setSettingsOpen(false)}
+      onSave={() => void save({ preventDefault: () => {} } as React.FormEvent)}
+      saveLabel={busy ? 'جاري الحفظ...' : 'حفظ الإعدادات'}
+      footer={<Button disabled={busy} type="submit" form="settings-form">{busy ? 'جاري الحفظ...' : 'حفظ الإعدادات'}</Button>}
+    >
+      <form id="settings-form" className="stack" onSubmit={save}>
+        <Input label="واتساب السنتر" value={settings.whatsapp} onChange={(e) => { setSettings({ ...settings, whatsapp: e.target.value }); setSettingsDirty(true); }} dir="ltr" />
+        <Input label="بريد التواصل" value={settings.contact_email} onChange={(e) => { setSettings({ ...settings, contact_email: e.target.value }); setSettingsDirty(true); }} dir="ltr" />
+        <Input label="السنة/الأرشيف" value={settings.archive_year} onChange={(e) => { setSettings({ ...settings, archive_year: e.target.value }); setSettingsDirty(true); }} />
+        <label className="row small muted"><input type="checkbox" checked={settings.registration_open} onChange={(e) => { setSettings({ ...settings, registration_open: e.target.checked }); setSettingsDirty(true); }} /> التسجيل مفتوح للطلاب</label>
+        <ErrorNotice error={error} />
+      </form>
+    </Modal>
   </>;
 }
