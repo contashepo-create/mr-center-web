@@ -294,10 +294,10 @@ export async function logActivity(centerId: string, action: string, details: str
       const { data: prof } = await sb.from('profiles').select('full_name').eq('id', uid).maybeSingle();
       actorName = (prof as { full_name?: string } | null)?.full_name ?? '';
     }
-    await sb.from('activity_log').insert({
-      id: uuid(), center_id: centerId, actor_id: uid,
-      actor_name: actorName, action, details,
-    });
+await sb.from('activity_log').insert({
+       id: uuid(), center_id: centerId, actor_id: uid,
+       actor_name: actorName, action, details
+     });
   } catch {
     // السجل إضافي — لا يكسر العملية الأساسية أبداً
   }

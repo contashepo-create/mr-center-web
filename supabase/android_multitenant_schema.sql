@@ -17,6 +17,44 @@
 BEGIN;
 
 -- ============================================================================
+-- تنظيف التعارضات من ترحيلات سابقة (إن وُجدت)
+-- ============================================================================
+
+-- ١) حذف كل إصدارات الدوال التي تغيّر نوع إرجاعها (CREATE OR REPLACE لا يغير النوع)
+DO $$
+DECLARE
+  r RECORD;
+BEGIN
+  FOR r IN SELECT oid::regprocedure::text AS fn FROM pg_proc WHERE proname IN ('accept_staff_invite','open_fiscal_year','close_fiscal_year','record_payment','dev_set_entitlements','dev_upsert_entitlement','accounting_enabled','get_invite_info','register_teacher_account','register_staff_account') LOOP
+    EXECUTE 'DROP FUNCTION ' || r.fn;
+  END LOOP;
+END $$;
+
+-- ٢) حذف الجداول القديمة ذات الأسماء المتعارضة (CASCADE لإزالة الاعتماديات)
+DO $$
+DECLARE
+  t TEXT;
+BEGIN
+  FOR t IN SELECT unnest(ARRAY['center_fiscal_years','center_ledger','staff_custody','staff_commission_rules','staff_invites','center_entitlements','support_messages','activity_log','subscription_requests','center_subscriptions','center_settings','app_notification_reads','app_notifications','app_survey_responses','app_surveys','app_inquiries','app_exam_attempts','app_exams','teacher_groups','student_groups']) LOOP
+    EXECUTE 'DROP TABLE IF EXISTS public.' || t || ' CASCADE';
+  END LOOP;
+END $$;
+
+-- ٣) إعادة تسمية أعمدة year القديمة إلى أسماء واضحة (لو كانت موجودة من ترحيلات سابقة)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='dues' AND column_name='year') THEN
+    ALTER TABLE public.dues RENAME COLUMN year TO due_year;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='payments' AND column_name='year') THEN
+    ALTER TABLE public.payments RENAME COLUMN year TO payment_year;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema='public' AND table_name='manual_grades' AND column_name='year') THEN
+    ALTER TABLE public.manual_grades RENAME COLUMN year TO grade_year;
+  END IF;
+END $$;
+
+-- ============================================================================
 -- ١) الجداول الجديدة
 -- ============================================================================
 
@@ -58,16 +96,11 @@ CREATE UNIQUE INDEX IF NOT EXISTS profiles_phone_unique
 CREATE INDEX IF NOT EXISTS idx_profiles_center ON public.profiles(center_id);
 CREATE INDEX IF NOT EXISTS idx_profiles_student ON public.profiles(student_id);
 
--- منتجات الباقات الاحترافية (ترقية للقواعد المنشأة سابقاً)
-ALTER TABLE public.center_subscriptions DROP CONSTRAINT IF EXISTS center_subscriptions_plan_type_check;
-ALTER TABLE public.center_subscriptions ADD CONSTRAINT center_subscriptions_plan_type_check
-  CHECK (plan_type IN ('monthly','yearly','custom','trial','center_full','center_medium','solo_teacher'));
-
 -- اشتراكات السناتر (يتحكم بها المطور فقط)
 CREATE TABLE IF NOT EXISTS public.center_subscriptions (
   id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   center_id  UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
-  plan_type  TEXT NOT NULL DEFAULT 'monthly' CHECK (plan_type IN ('monthly','yearly','custom')),
+  plan_type  TEXT NOT NULL DEFAULT 'trial' CHECK (plan_type IN ('monthly','yearly','custom','trial','center_full','center_medium','solo_teacher')),
   starts_on  DATE NOT NULL DEFAULT CURRENT_DATE,
   ends_on    DATE NOT NULL,
   status     TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','expired','suspended')),
@@ -1246,71 +1279,6 @@ DROP POLICY IF EXISTS "staff_invites_legacy" ON public.staff_invites;
 CREATE POLICY "staff_invites_legacy" ON public.staff_invites FOR ALL TO authenticated
   USING (public.is_legacy_admin()) WITH CHECK (public.is_legacy_admin());
 
--- بيانات دعوة للعرض قبل التسجيل (اسم السنتر والصفة فقط — بلا بيانات حساسة)
-CREATE OR REPLACE FUNCTION public.get_invite_info(p_code TEXT)
-RETURNS JSONB LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  v_inv public.staff_invites%ROWTYPE;
-  v_center TEXT;
-  v_status TEXT;
-BEGIN
-  SELECT * INTO v_inv FROM public.staff_invites
-   WHERE upper(code) = upper(trim(p_code)) LIMIT 1;
-  IF v_inv.id IS NULL THEN RETURN jsonb_build_object('found', false); END IF;
-  SELECT name, status INTO v_center, v_status FROM public.centers WHERE id = v_inv.center_id;
-  IF v_status IS DISTINCT FROM 'active' THEN
-    RETURN jsonb_build_object('found', true, 'suspended', true);
-  END IF;
-  RETURN jsonb_build_object(
-    'found', true, 'center_id', v_inv.center_id, 'center_name', v_center,
-    'role', v_inv.role, 'name', v_inv.name,
-    'usable', (v_inv.status = 'pending')
-  );
-END;
-$$;
-GRANT EXECUTE ON FUNCTION public.get_invite_info(TEXT) TO anon, authenticated;
-
--- قبول الدعوة: ينشئ حساب الفريق خاملاً ويربط مجموعاته ويغلق الدعوة
-CREATE OR REPLACE FUNCTION public.accept_staff_invite(p_code TEXT)
-RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
-DECLARE
-  v_uid UUID := auth.uid();
-  v_email TEXT;
-  v_inv public.staff_invites%ROWTYPE;
-  v_status TEXT;
-  g TEXT;
-BEGIN
-  IF v_uid IS NULL THEN RAISE EXCEPTION 'not_authenticated'; END IF;
-  IF EXISTS (SELECT 1 FROM public.profiles WHERE id = v_uid) THEN
-    RAISE EXCEPTION 'already_registered';
-  END IF;
-  SELECT * INTO v_inv FROM public.staff_invites
-   WHERE upper(code) = upper(trim(p_code)) LIMIT 1;
-  IF v_inv.id IS NULL THEN RAISE EXCEPTION 'invalid_invite'; END IF;
-  IF v_inv.status <> 'pending' THEN RAISE EXCEPTION 'invite_used'; END IF;
-  SELECT status INTO v_status FROM public.centers WHERE id = v_inv.center_id;
-  IF v_status IS NULL THEN RAISE EXCEPTION 'center_not_found'; END IF;
-  IF v_status <> 'active' THEN RAISE EXCEPTION 'center_suspended'; END IF;
-  SELECT email INTO v_email FROM auth.users WHERE id = v_uid;
-  BEGIN
-    INSERT INTO public.profiles (id, role, center_id, full_name, email, phone, is_active, perms)
-    VALUES (v_uid, v_inv.role, v_inv.center_id, nullif(trim(v_inv.name), ''), v_email,
-            nullif(trim(COALESCE(v_inv.phone, '')), ''), false, COALESCE(v_inv.perms, '{}'));
-  EXCEPTION WHEN unique_violation THEN
-    RAISE EXCEPTION 'phone_taken';
-  END;
-  FOR g IN SELECT jsonb_array_elements_text(COALESCE(v_inv.group_ids, '[]'::jsonb)) LOOP
-    INSERT INTO public.teacher_groups (teacher_id, group_id, center_id)
-    SELECT v_uid::text, g, v_inv.center_id
-    WHERE EXISTS (SELECT 1 FROM public.groups WHERE id = g AND center_id = v_inv.center_id)
-    ON CONFLICT DO NOTHING;
-  END LOOP;
-  UPDATE public.staff_invites SET status = 'accepted', accepted_by = v_uid WHERE id = v_inv.id;
-  RETURN v_uid;
-END;
-$$;
-GRANT EXECUTE ON FUNCTION public.accept_staff_invite(TEXT) TO authenticated;
-
 -- ============================================================================
 -- ٦/هـ) قناة الدعم: رسائل ثنائية بين مالك السنتر والمطور
 -- (المالك يقرأ ويرسل لسنتره فقط — المطور يرى الكل ويرد)
@@ -1746,6 +1714,7 @@ DROP POLICY IF EXISTS ledger_developer_all ON public.center_ledger;
 CREATE POLICY ledger_developer_all ON public.center_ledger FOR ALL TO authenticated USING ((SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid())) WITH CHECK ((SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid()));
 
 -- Developer can grant extra staff slots and time-bound paid features.
+DROP FUNCTION IF EXISTS public.dev_set_entitlements(UUID,INT,INT,INT,JSONB);
 CREATE OR REPLACE FUNCTION public.dev_set_entitlements(p_center UUID, p_teachers INT, p_secretaries INT, p_managers INT, p_features JSONB)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
 BEGIN
@@ -1793,6 +1762,38 @@ END; $$;
 DROP TRIGGER IF EXISTS trg_payment_income ON public.payments;
 CREATE TRIGGER trg_payment_income AFTER INSERT ON public.payments FOR EACH ROW EXECUTE FUNCTION public.record_payment_income();
 
+-- دالة تسجيل الدفعة بشكل ذري (تمنع تجاوز المستحق وتخزين هوية المحصل)
+CREATE OR REPLACE FUNCTION public.record_payment(
+  p_due_id TEXT, p_amount NUMERIC, p_collected_by UUID, p_collected_by_name TEXT
+) RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$
+DECLARE
+  v_due RECORD;
+  v_paid NUMERIC;
+  v_remaining NUMERIC;
+  v_payment_id TEXT;
+BEGIN
+  -- قفل صف المستحق لمنع التعازي
+  SELECT * INTO v_due FROM public.dues WHERE id = p_due_id FOR UPDATE;
+  IF NOT FOUND THEN RAISE EXCEPTION 'due_not_found'; END IF;
+
+  -- حساب المدفوع سابقاً
+  SELECT COALESCE(SUM(amount), 0) INTO v_paid
+    FROM public.payments WHERE due_id = p_due_id;
+  v_remaining := v_due.amount - v_paid;
+
+  -- رفض الدفع الأعلى من المتبقي
+  IF p_amount > v_remaining THEN RAISE EXCEPTION 'payment_exceeds_remaining'; END IF;
+  IF p_amount <= 0 THEN RAISE EXCEPTION 'invalid_payment_amount'; END IF;
+
+  -- إنشاء الدفعة
+  v_payment_id := uuid_generate_v4()::text;
+  INSERT INTO public.payments(id, student_id, due_id, amount, month, payment_year, collected_by, collected_by_name)
+  VALUES(v_payment_id, v_due.student_id, p_due_id, p_amount, v_due.month, v_due.due_year, p_collected_by, p_collected_by_name);
+
+  RETURN v_payment_id::uuid;
+END; $$;
+GRANT EXECUTE ON FUNCTION public.record_payment(TEXT, NUMERIC, UUID, TEXT) TO authenticated;
+
 -- صلاحيات إضافية مؤقتة لكل سنتر (تدار من لوحة المطور)
 CREATE TABLE IF NOT EXISTS public.center_entitlements (
  id UUID PRIMARY KEY DEFAULT gen_random_uuid(), center_id UUID NOT NULL REFERENCES public.centers(id) ON DELETE CASCADE,
@@ -1808,6 +1809,7 @@ CREATE POLICY entitlements_dev_all ON public.center_entitlements FOR ALL TO auth
 ALTER TABLE public.center_ledger ADD COLUMN IF NOT EXISTS period_month INT;
 ALTER TABLE public.center_ledger ADD COLUMN IF NOT EXISTS period_year INT;
 ALTER TABLE public.center_ledger ADD COLUMN IF NOT EXISTS deduction NUMERIC(12,2) NOT NULL DEFAULT 0;
+DROP FUNCTION IF EXISTS public.dev_upsert_entitlement(UUID,INT,INT,INT,DATE,DATE,BOOLEAN);
 CREATE OR REPLACE FUNCTION public.dev_upsert_entitlement(p_center UUID,p_teachers INT,p_secretaries INT,p_managers INT,p_starts DATE,p_ends DATE,p_open BOOLEAN)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path=public AS $$ BEGIN
  IF NOT ((SELECT role='super_admin' FROM public.profiles WHERE id=auth.uid())) THEN RAISE EXCEPTION 'not_allowed'; END IF;
@@ -1943,6 +1945,7 @@ CREATE POLICY fiscal_dev_all ON public.center_fiscal_years FOR ALL TO authentica
   WITH CHECK ((SELECT role = 'super_admin' FROM public.profiles WHERE id = auth.uid()));
 
 -- فتح سنة مالية: رصيد أول المدة = رصيد إغلاق آخر سنة مغلقة قبله
+DROP FUNCTION IF EXISTS public.open_fiscal_year(INT);
 CREATE OR REPLACE FUNCTION public.open_fiscal_year(p_year INT)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
@@ -1965,6 +1968,7 @@ END; $$;
 GRANT EXECUTE ON FUNCTION public.open_fiscal_year(INT) TO authenticated;
 
 -- إغلاق سنة: حساب الصافي + فتح السنة التالية بترحيل الرصيد تلقائياً
+DROP FUNCTION IF EXISTS public.close_fiscal_year(INT);
 CREATE OR REPLACE FUNCTION public.close_fiscal_year(p_year INT)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
@@ -2042,6 +2046,7 @@ END; $$;
 GRANT EXECUTE ON FUNCTION public.get_invite_info(TEXT) TO anon, authenticated;
 
 -- قبول الدعوة: حساب جديد بلا ملف → ملف فريق خامل (بانتظار تفعيل صاحب السنتر)
+DROP FUNCTION IF EXISTS public.accept_staff_invite(TEXT);
 CREATE OR REPLACE FUNCTION public.accept_staff_invite(p_code TEXT)
 RETURNS VOID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
