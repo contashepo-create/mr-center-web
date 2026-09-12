@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS public.dues (
   student_id TEXT NOT NULL,
   group_id   TEXT,
   month      INT NOT NULL,
-  year       INT NOT NULL,
+  due_year   INT NOT NULL,
   amount     NUMERIC NOT NULL DEFAULT 0,
   status     TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','partial')),
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -159,7 +159,7 @@ CREATE TABLE IF NOT EXISTS public.payments (
   amount       NUMERIC NOT NULL DEFAULT 0,
   payment_date DATE NOT NULL DEFAULT CURRENT_DATE,
   month        INT NOT NULL,
-  year         INT NOT NULL,
+  payment_year INT NOT NULL,
   notes        TEXT,
   created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -197,7 +197,7 @@ CREATE TABLE IF NOT EXISTS public.manual_grades (
   score      NUMERIC NOT NULL DEFAULT 0,
   max_score  NUMERIC NOT NULL DEFAULT 0,
   month      INT NOT NULL,
-  year       INT NOT NULL,
+  grade_year INT NOT NULL,
   notes      TEXT,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
