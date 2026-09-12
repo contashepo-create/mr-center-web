@@ -238,6 +238,12 @@ export interface ExamQuestion {
   answer?: string;
   /** أزواج التوصيل (وصل) */
   pairs?: ExamPair[];
+  /** صورة السؤال (رابط خارجي أو رابط تخزين عام) */
+  image?: string | null;
+  /** مكان الصورة: بجانب السؤال (ورقي) أو فوق/تحت (إلكتروني) */
+  imagePosition?: 'beside' | 'above' | 'below';
+  /** عرض الصورة بالبكسل (80..600) */
+  imageSize?: number;
 }
 
 /** قيمة إجابة سؤال: فهرس / مصفوفة فهارس / نص / null لليدوي بلا نموذج */
@@ -245,6 +251,27 @@ export type ExamAnswer = number | number[] | string | null;
 
 /** طريقة إظهار النتيجة للطالب */
 export type ExamResultMode = 'after_each' | 'end' | 'never';
+
+/** كثافة الزخارف حول الورقة */
+export type OrnamentDensity = 'low' | 'medium' | 'high';
+
+/** ختم زخرفة موضوع يدوياً على الورقة (كنسبة مئوية من أبعادها) */
+export interface OrnamentStamp {
+  id: string;
+  kind: string;
+  x: number; // 0..100
+  y: number; // 0..100
+  size: number; // px
+}
+
+/** إعدادات زخارف ورقة الاختبار */
+export interface ExamOrnaments {
+  placement: 'auto' | 'manual';
+  density: OrnamentDensity;
+  opacity: number; // 0..1
+  kinds: string[]; // الأنواع المختارة (تُعبأ تلقائياً حسب المادة)
+  stamps: OrnamentStamp[]; // أختام يدوية (وضع manual)
+}
 
 export interface AppExam {
   id: string;
@@ -259,6 +286,8 @@ export interface AppExam {
   is_published: boolean;
   attempts_allowed: number;
   show_result: ExamResultMode;
+  /** زخارف الورقة (اختياري — قد تكون غائبة في الاختبارات القديمة) */
+  ornaments?: ExamOrnaments | null;
   created_at: string;
 }
 

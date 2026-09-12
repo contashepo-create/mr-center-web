@@ -1057,6 +1057,7 @@ export async function upsertExam(centerId: string, exam: Partial<AppExam> & {
     is_published: exam.is_published ?? false,
     attempts_allowed: exam.attempts_allowed ?? 1,
     show_result: exam.show_result ?? 'end',
+    ornaments: exam.ornaments ?? null,
   };
   if (exam.id) {
     const { error } = await getSupabase().from('app_exams').update(payload).eq('id', exam.id);
