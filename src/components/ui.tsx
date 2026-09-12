@@ -90,7 +90,7 @@ export function LoadingScreen({ text = 'جاري التحميل...' }: { text?: 
       <div className="card auth-card" style={{ textAlign: 'center' }}>
         <div className="logo" style={{ margin: '0 auto 16px' }}>MR</div>
         <h1 className="h3">{text}</h1>
-        <p className="muted">نجهز الجلسة ونقرأ صلاحيات المستخدم من Supabase.</p>
+        <p className="muted">نجهز الجلسة ونقرأ صلاحيات المستخدم.</p>
       </div>
     </div>
   );

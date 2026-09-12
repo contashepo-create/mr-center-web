@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader, Select } from '@/components/ui';
 import { useSession } from '@/context/session';
+import { closeFiscalYear, fetchMyFiscalYears, requestAccounting, type FiscalYear } from '@/lib/features';
 import { isOwner, roleLabel } from '@/lib/rbac';
 import { getSupabase } from '@/lib/supabase';
 import type { Profile } from '@/lib/types';
@@ -37,12 +38,56 @@ const ENTRY_LABEL: Record<EntryType, string> = {
 };
 const EXPENSE_TYPES: EntryType[] = ['general', 'salary', 'advance', 'bonus', 'rent', 'utility', 'purchase'];
 
+function AccountingUpsell({ centerId }: { centerId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+
+  const request = async () => {
+    setBusy(true);
+    setError(null);
+    setMessage(null);
+    try {
+      await requestAccounting(centerId);
+      setMessage('تم إرسال طلب التفعيل إلى الإدارة وسيتم التواصل معك.');
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <main className="container" style={{ padding: '28px 0' }}>
+      <Card className="stack-lg" style={{ maxWidth: 680, margin: '0 auto', textAlign: 'center' }}>
+        <div className="logo" style={{ margin: '0 auto' }}>💼</div>
+        <div>
+          <h1 className="h2">المحاسبة — خدمة إضافية</h1>
+          <p className="muted" style={{ lineHeight: 1.9 }}>
+            سجلاتك المالية تُحفظ وتُسجل تلقائياً في الخلفية منذ بداية اشتراكك (الإيرادات والتحصيل والعهدة)،
+            لكن الاطلاع على الدفتر المالي وتسجيل المصروفات والرواتب والعمولات متاح بعد تفعيل الخدمة من الإدارة.
+          </p>
+        </div>
+        <Notice tone="warn">هذه الخدمة مدفوعة وتُفعَّل لكل سنتر على حدة. عند التفعيل ستجد كل حساباتك جاهزة من البداية.</Notice>
+        <ErrorNotice error={error} />
+        {message ? <Notice tone="success">{message}</Notice> : null}
+        <Button type="button" className="block" disabled={busy} onClick={request}>
+          {busy ? 'جارٍ الإرسال...' : 'طلب تفعيل الخدمة'}
+        </Button>
+      </Card>
+    </main>
+  );
+}
+
 export default function AccountingPage() {
-  const { profile } = useSession();
+  const { profile, features } = useSession();
   const centerId = profile?.center_id;
   const [rows, setRows] = useState<Ledger[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [rules, setRules] = useState<CommissionRule[]>([]);
+  const [years, setYears] = useState<FiscalYear[]>([]);
+  const [closing, setClosing] = useState(false);
+  const [yearMsg, setYearMsg] = useState<string | null>(null);
   const [form, setForm] = useState({ entry_type: 'general' as EntryType, employee_id: '', category: '', description: '', amount: '', deduction: '0', occurred_on: todayIso() });
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
@@ -85,10 +130,11 @@ export default function AccountingPage() {
     setError(null);
     try {
       const sb = getSupabase();
-      const [ledgerRes, staffRes, rulesRes] = await Promise.all([
+      const [ledgerRes, staffRes, rulesRes, yearsRes] = await Promise.all([
         sb.from('center_ledger').select('*').eq('center_id', centerId).order('occurred_on', { ascending: false }).limit(1000),
         sb.from('profiles').select('id,full_name,role').eq('center_id', centerId).in('role', ['teacher', 'manager', 'secretary']).order('full_name'),
         sb.from('staff_commission_rules').select('*').eq('center_id', centerId).order('created_at', { ascending: false }),
+        fetchMyFiscalYears().catch(() => []),
       ]);
       if (ledgerRes.error) throw ledgerRes.error;
       if (staffRes.error) throw staffRes.error;
@@ -96,12 +142,35 @@ export default function AccountingPage() {
       setRows((ledgerRes.data ?? []) as Ledger[]);
       setStaff((staffRes.data ?? []) as Staff[]);
       setRules((rulesRes.data ?? []) as CommissionRule[]);
+      setYears(yearsRes);
       if (!commission.staff_id && staffRes.data?.[0]) setCommission((old) => ({ ...old, staff_id: (staffRes.data[0] as Staff).id }));
     } catch (err) { setError(err); }
   };
   useEffect(() => { void load(); }, [centerId]);
 
+  const closeYear = async () => {
+    if (!centerId) return;
+    const openYear = years.find((y) => y.status === 'open');
+    const label = openYear?.year_label ?? '';
+    if (!window.confirm(`سيتم إغلاق السنة المالية ${label || 'الحالية'} وفتح سنة جديدة مع ترحيل الرصيد الافتتاحي والمستحقات المعلقة. هل أنت متأكد؟`)) return;
+    setClosing(true);
+    setError(null);
+    setYearMsg(null);
+    try {
+      const res = await closeFiscalYear(centerId);
+      setYearMsg(`تم إغلاق سنة ${res.closed} وفتح سنة ${res.opened} — الرصيد المرحّل: ${formatMoney(res.carry_balance)} والمستحقات المعلقة: ${formatMoney(res.carry_pending)}.`);
+      await load();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setClosing(false);
+    }
+  };
+
   if (profile && !isOwner(profile)) return <Card><Notice tone="error">المحاسبة متاحة لصاحب السنتر فقط.</Notice></Card>;
+  if (isOwner(profile) && features && !features.accounting) {
+    return centerId ? <AccountingUpsell centerId={centerId} /> : null;
+  }
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -169,6 +238,37 @@ export default function AccountingPage() {
   return <>
     <PageHeader title="المحاسبة" subtitle="دفتر مالي: إيرادات التحصيل آلية، والمصروفات/الرواتب/السلف يضيفها صاحب السنتر فقط." actions={<Button type="button" variant="secondary" onClick={printFinancial}>طباعة تقرير مالي</Button>} />
     <ErrorNotice error={error} />{message ? <Notice tone="success">{message}</Notice> : null}
+    {yearMsg ? <Notice tone="success">{yearMsg}</Notice> : null}
+    <Card className="stack" style={{ marginBottom: 18 }}>
+      <div className="row-between">
+        <h2 className="h3">السنة المالية</h2>
+        {years.some((y) => y.status === 'open') ? (
+          <Button type="button" variant="secondary" disabled={closing} onClick={closeYear}>{closing ? 'جارٍ الإغلاق...' : 'إغلاق السنة وفتح سنة جديدة'}</Button>
+        ) : null}
+      </div>
+      {years.length === 0 ? <EmptyState title="لا توجد سنوات مالية" body="تُنشأ السنة المالية تلقائياً مع إنشاء السنتر." /> : (
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>السنة</th><th>تبدأ</th><th>تنتهي</th><th>الحالة</th><th>رصيد افتتاحي</th><th>إيرادات</th><th>مصروفات</th><th>رصيد الختام</th><th>مستحقات معلقة</th></tr></thead>
+            <tbody>
+              {years.map((y) => (
+                <tr key={y.id}>
+                  <td><strong>{y.year_label}</strong></td>
+                  <td>{formatDate(y.starts_on)}</td>
+                  <td>{y.ends_on ? formatDate(y.ends_on) : '—'}</td>
+                  <td><Badge tone={y.status === 'open' ? 'success' : 'default'}>{y.status === 'open' ? 'مفتوحة' : 'مغلقة'}</Badge></td>
+                  <td>{formatMoney(y.opening_balance)}</td>
+                  <td>{y.closing_income === null ? '—' : formatMoney(y.closing_income)}</td>
+                  <td>{y.closing_expense === null ? '—' : formatMoney(y.closing_expense)}</td>
+                  <td><strong>{y.closing_balance === null ? '—' : formatMoney(y.closing_balance)}</strong></td>
+                  <td>{y.closing_pending_dues === null ? '—' : formatMoney(y.closing_pending_dues)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
     <div className="grid grid-4" style={{ marginBottom: 18 }}><Card className="compact kpi"><span className="muted">الإيرادات</span><div className="kpi-value">{formatMoney(totals.income)}</div></Card><Card className="compact kpi"><span className="muted">المصروفات</span><div className="kpi-value">{formatMoney(totals.expense)}</div></Card><Card className="compact kpi"><span className="muted">الصافي</span><div className="kpi-value">{formatMoney(totals.income - totals.expense)}</div></Card><Card className="compact kpi"><span className="muted">حركات الفترة</span><div className="kpi-value">{filteredRows.length}</div></Card></div>
     <div className="grid grid-2">
       <Card className="stack"><h2 className="h3">فلترة الفترة</h2><div className="grid grid-2"><Input label="من تاريخ" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /><Input label="إلى تاريخ" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></div><Notice>مصدر الإيراد الوحيد هو `payment_collection` الناتج تلقائياً من دفعات الطلاب؛ هذا يمنع تكرار الإيرادات محاسبياً.</Notice></Card>

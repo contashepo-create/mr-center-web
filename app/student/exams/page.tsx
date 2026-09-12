@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react';
 import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader, formatStatus } from '@/components/ui';
 import { fetchMyExamAttempts, fetchPublishedExams, submitExam } from '@/lib/api';
 import type { ExamAnswer, ExamAttempt, ExamQuestion, PublishedExam } from '@/lib/types';
-import { EXAM_TYPE_LABEL, formatDate } from '@/lib/utils';
+import { EXAM_TYPE_LABEL, formatDate, normalizeAnswerText } from '@/lib/utils';
 import { useSession } from '@/context/session';
 
 function defaultAnswer(q: ExamQuestion): ExamAnswer {
@@ -43,7 +43,24 @@ export default function StudentExamsPage() {
   const load = async () => { setError(null); try { const [e, a] = await Promise.all([fetchPublishedExams(), profile?.student_id ? fetchMyExamAttempts(profile.student_id) : Promise.resolve([])]); setExams(e); setAttempts(a); } catch (err) { setError(err); } };
   useEffect(() => { void load(); }, [profile?.student_id]);
   const start = (exam: PublishedExam) => { setActive(exam); setAnswers(exam.questions.map(defaultAnswer)); setMessage(null); setError(null); };
-  const submit = async () => { if (!active) return; setBusy(true); setError(null); setMessage(null); try { const res = await submitExam(active.id, answers); setMessage(`تم التسليم. نتيجتك ${res.score} من ${res.max_score} — ${res.status === 'pending_review' ? 'بانتظار المراجعة' : 'تم التصحيح'}`); setActive(null); await load(); } catch (err) { setError(err); } finally { setBusy(false); } };
+  const submit = async () => {
+    if (!active) return;
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      // تطبيع الإجابات بنفس طريقة تطبيق Android (complete نص مطبَّع، multi مرتب)
+      const clean = active.questions.map((q, i) => {
+        const a = answers[i];
+        if ((q.type === 'complete' || q.type === 'correct') && typeof a === 'string') return normalizeAnswerText(a);
+        if (q.type === 'multi' && Array.isArray(a)) return [...(a as number[])].sort((x, y) => x - y);
+        return a;
+      });
+      const res = await submitExam(active.id, clean);
+      setMessage(`تم التسليم. نتيجتك ${res.score} من ${res.max_score} — ${res.status === 'pending_review' ? 'بانتظار المراجعة' : 'تم التصحيح'}`);
+      setActive(null);
+      await load();
+    } catch (err) { setError(err); }
+    finally { setBusy(false); }
+  };
 
   return <>
     <PageHeader title="اختباراتي" subtitle="الاختبارات المنشورة من السنتر." />

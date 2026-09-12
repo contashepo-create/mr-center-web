@@ -4,7 +4,8 @@
 // ============================================================
 
 import { getSupabase } from './supabase';
-import { nowIso, todayIso, uuid } from './utils';
+import { getDeviceId } from './visitors';
+import { normalizeAnswerText, nowIso, todayIso, uuid } from './utils';
 import type {
   Announcement, AppExam, AppInquiry, AppNotification, AppSurvey, AppSurveyResponse, Attendance, AttendanceStatus,
   Center, CenterLookup, CenterSettings, Due, ExamAttempt, Grade,
@@ -17,11 +18,28 @@ import type {
 // ------------------------------------------------------------
 
 export async function loginWithEmail(email: string, password: string) {
-  const { data, error } = await getSupabase().auth.signInWithPassword({
-    email: email.trim().toLowerCase(),
-    password,
-  });
-  if (error) throw error;
+  const normalized = email.trim().toLowerCase();
+  const device = getDeviceId();
+  const sb = getSupabase();
+
+  // حماية خادمية من تخمين كلمات المرور: يمنع تجاوز الحد قبل محاولة الدخول
+  try {
+    await sb.rpc('check_login_allowed', { p_email: normalized, p_device: device || null });
+  } catch (e) {
+    // إن لم يكن الترحيل مطبقاً بعد نتجاهل الخطأ ولا نمنع الدخول
+    if (String((e as any)?.message ?? '').includes('login_rate_limited')) throw e;
+  }
+
+  const { data, error } = await sb.auth.signInWithPassword({ email: normalized, password });
+  if (error) {
+    try { await sb.rpc('record_login_attempt', { p_email: normalized, p_device: device || null, p_success: false }); } catch { /* ignore */ }
+    throw error;
+  }
+  try { await sb.rpc('record_login_attempt', { p_email: normalized, p_device: device || null, p_success: true }); } catch { /* ignore */ }
+
+  // جلسة واحدة لكل حساب: هذا الجهاز يستحوذ على الجلسة ويُخرج أي جهاز آخر
+  const { claimMySession } = await import('./sessionGuard');
+  await claimMySession();
   return data;
 }
 
@@ -658,37 +676,18 @@ export async function recordPayment(input: {
   if (!amount || amount <= 0) throw new Error('invalid_payment_amount');
   if (input.month < 1 || input.month > 12 || input.year < 2000) throw new Error('invalid_payment_period');
 
-  const sb = getSupabase();
-  let dueAmount: number | null = null;
-  let paidBefore = 0;
-  if (input.dueId) {
-    const [dueRes, paidRes] = await Promise.all([
-      sb.from('dues').select('amount').eq('id', input.dueId).maybeSingle(),
-      sb.from('payments').select('amount').eq('due_id', input.dueId).limit(1000),
-    ]);
-    if (dueRes.error) throw dueRes.error;
-    if (paidRes.error) throw paidRes.error;
-    if (!dueRes.data) throw new Error('due_not_found');
-    dueAmount = Number((dueRes.data as { amount: number }).amount || 0);
-    paidBefore = ((paidRes.data ?? []) as { amount: number }[]).reduce((sum, row) => sum + Number(row.amount || 0), 0);
-  }
-
-  const { data: authData } = await sb.auth.getUser();
-  const actorId = authData.user?.id ?? null;
-  const { data: actor } = actorId ? await sb.from('profiles').select('full_name').eq('id', actorId).maybeSingle() : { data: null };
-  const { error } = await sb.from('payments').insert({
-    id: uuid(), center_id: input.centerId, student_id: input.studentId,
-    collected_by: actorId, collected_by_name: actor?.full_name ?? '',
-    due_id: input.dueId ?? null, amount,
-    payment_date: todayIso(), month: input.month, year: input.year,
-    notes: input.notes?.trim() || null, created_at: nowIso(),
+  // التحصيل يتم خادمياً ذرياً عبر record_payment RPC:
+  // يقفل صف المستحق ويمنع السباق (Race Condition) وتجاوز المبلغ من جهازين في نفس اللحظة.
+  const { error } = await getSupabase().rpc('record_payment', {
+    p_center: input.centerId,
+    p_student: input.studentId,
+    p_due: input.dueId ?? null,
+    p_amount: amount,
+    p_month: input.month,
+    p_year: input.year,
+    p_notes: input.notes?.trim() || null,
   });
   if (error) throw error;
-  if (input.dueId && dueAmount !== null) {
-    const status = paidBefore + amount >= dueAmount ? 'paid' : 'partial';
-    const { error: dueErr } = await sb.from('dues').update({ status }).eq('id', input.dueId);
-    if (dueErr) throw dueErr;
-  }
 }
 
 export async function updateStudentGroup(studentId: string, groupId: string | null, gradeId: string | null): Promise<void> {
@@ -900,14 +899,30 @@ export async function upsertExam(centerId: string, exam: Partial<AppExam> & {
   const total = exam.questions.length > 0
     ? Number(exam.total_score || 0) || marksSum
     : 0;
+
+  // تطبيع النماذج بنفس طريقة تطبيق Android:
+  // - complete/correct: تطبيع النص العربي (أ/إ/آ ← ا، إزالة الزوائد)
+  // - multi: ترتيب فهارس الإجابات حتى لا يتأثر التصحيح بترتيب الاختيار
+  const questions = exam.questions.map((q) =>
+    (q.type === 'complete' || q.type === 'correct')
+      ? { ...q, answer: normalizeAnswerText(typeof q.answer === 'string' ? q.answer : '') }
+      : q,
+  );
+  const answers = exam.answers.map((a, i) => {
+    const t = questions[i]?.type;
+    if ((t === 'complete' || t === 'correct') && typeof a === 'string') return normalizeAnswerText(a);
+    if (t === 'multi' && Array.isArray(a)) return [...(a as number[])].sort((x, y) => x - y);
+    return a;
+  });
+
   const payload = {
     center_id: centerId,
     title: exam.title.trim(),
     subject: exam.subject?.trim() || '',
     grade_id: exam.grade_id ?? null,
     duration_minutes: exam.duration_minutes ?? 30,
-    questions: exam.questions,
-    answers: exam.answers,
+    questions,
+    answers,
     total_score: total,
     is_published: exam.is_published ?? false,
   };

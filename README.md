@@ -128,37 +128,35 @@ http://localhost:3000
 
 ## متغيرات البيئة
 
-أنشئ ملف `.env.local`:
+**لا تحتاج إلى أي متغيرات بيئة.** الويب يقرأ مفاتيح قاعدة البيانات تلقائياً من خادم الإعدادات المركزي (كلاود فلير) — نفس الطريقة التي يعمل بها تطبيق Android تماماً، وكل الأسرار موجودة على كلاود فلير فقط.
 
-```env
-NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_SUPABASE_ANON_KEY
-```
+ترتيب الأولوية عند التشغيل:
+1. إعدادات يدوية أدخلها المطور على هذا المتصفح (للتجربة فقط — تُحفظ محلياً).
+2. كلاود فلير — المصدر المركزي (نفس عامل `mr-center-config` الخاص بالتطبيق).
+3. آخر إعدادات ناجحة مخزنة محلياً (عند انقطاع الشبكة).
+4. متغيرات البيئة كملاذ أخير (اختياري لمن يفضّل ضبطاً يدوياً على خادمه).
 
-أثناء المعاينة يمكن أيضاً إدخال `Supabase URL` و `Anon Key` من شاشة عدم ضبط الاتصال؛ تُحفظ محلياً في المتصفح للتجربة فقط.
-
-أو يمكنك استخدام نفس Cloudflare Worker الخاص بالتطبيق إذا كان يرجع `database.url` و `database.anon_key`:
+لتغيير خادم الإعدادات عن الافتراضي (نادراً ما تحتاجه):
 
 ```env
 NEXT_PUBLIC_CONFIG_URL=https://your-worker.workers.dev/config
 ```
 
-> مهم: لا تضع `service_role_key` في متغير يبدأ بـ `NEXT_PUBLIC_`. الواجهة تستخدم `anon key` فقط وتعتمد على RLS.
+> مهم: لا تضع أبداً `service_role` أو أي مفتاح سري في متغير يبدأ بـ `NEXT_PUBLIC_`. الواجهة تستخدم مفتاح الوصول العام فقط (يأتي من كلاود فلير) والحماية كلها في سياسات RLS.
 
 ---
 
 ## النشر على Vercel
 
-1. اربط هذا المستودع بـ Vercel.
-2. أضف Environment Variables السابقة.
-3. Build Command:
+1. اربط هذا المستودع بـ Vercel (بدون أي Environment Variables).
+2. Build Command:
 
 ```bash
 npm run build
 ```
 
-4. Output تلقائي من Next.js.
-5. في Supabase Auth اضبط:
+3. Output تلقائي من Next.js.
+4. في Supabase Auth اضبط:
    - Site URL على دومين Vercel النهائي.
    - Redirect URLs لتشمل دومين Vercel.
 
@@ -173,6 +171,14 @@ supabase/android_multitenant_schema.sql
 ```
 
 لا تنشئ قاعدة بيانات جديدة للويب. الويب والتطبيق يجب أن يستخدما نفس Supabase project حتى تكون البيانات مشتركة.
+
+الترحيلات التالية (تُشغَّل مرة واحدة بالترتيب في Supabase SQL Editor وهي idempotent):
+
+```txt
+supabase/android_multitenant_schema.sql          # المخطط الأساسي الكامل
+supabase/20260912_fiscal_accounting.sql          # السنة المالية + المحاسبة + الاشتراكات + الزوار
+supabase/20260912_security.sql                   # السباقات + جلسة واحدة + منع الروبوتات
+```
 
 ---
 

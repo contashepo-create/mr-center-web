@@ -3,7 +3,7 @@ import { RequireAuth } from '@/components/guards';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
-    <RequireAuth roles={['center_admin', 'teacher', 'manager', 'secretary']}>
+    <RequireAuth roles={['super_admin', 'center_admin', 'teacher', 'manager', 'secretary']}>
       <AppFrame area="admin">{children}</AppFrame>
     </RequireAuth>
   );
