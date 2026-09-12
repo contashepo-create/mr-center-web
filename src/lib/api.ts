@@ -11,6 +11,7 @@ import type {
   Center, CenterLookup, CenterSettings, Due, ExamAttempt, Grade,
   ExamAnswer, ExamQuestion, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
   PublishedExam, SessionRecord, Student, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
+  SurveyAnswer, SurveyQuestion,
 } from './types';
 
 // ------------------------------------------------------------
@@ -201,18 +202,24 @@ export interface StaffInviteRow {
   role: 'teacher' | 'secretary'; status: 'pending' | 'accepted' | 'revoked'; created_at: string;
 }
 
-/** توليد كود دعوة (6 خانات بلا حروف ملتبسة) */
+/** توليد كود دعوة رقمي من 10 خانات على الأقل (واضح وسهل النسخ والإملاء) */
 export function generateInviteCode(): string {
-  const ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  let out = '';
-  const rnd = new Uint32Array(6);
-  crypto.getRandomValues(rnd);
-  for (let i = 0; i < 6; i++) out += ABC[rnd[i] % ABC.length];
-  return out;
+  const digits: number[] = [];
+  try {
+    const rnd = new Uint32Array(10);
+    crypto.getRandomValues(rnd);
+    for (let i = 0; i < 10; i++) digits.push(rnd[i] % 10);
+  } catch {
+    // بيئة بلا Web Crypto (نادر على الويب) — تراجع آمن بلا تعطيل
+    for (let i = 0; i < 10; i++) digits.push(Math.floor(Math.random() * 10));
+  }
+  if (digits[0] === 0) digits[0] = 1 + (Math.floor(Math.random() * 9));
+  return digits.join('');
 }
 
 export async function createStaffInvite(input: {
   centerId: string; name: string; phone: string; role: 'teacher' | 'secretary';
+  perms?: TeacherPerms;
 }): Promise<string> {
   const sb = getSupabase();
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -220,7 +227,7 @@ export async function createStaffInvite(input: {
     const { error } = await sb.from('staff_invites').insert({
       center_id: input.centerId, code, name: input.name.trim(),
       phone: input.phone.trim() || null, role: input.role,
-      perms: {}, group_ids: [],
+      perms: input.perms ?? {}, group_ids: [],
     });
     if (!error) return code;
     if (!String((error as { message?: string }).message ?? '').includes('duplicate key')) throw error;
@@ -291,13 +298,17 @@ export async function logActivity(centerId: string, action: string, details: str
     const uid = sess.session?.user.id ?? '';
     let actorName = '';
     if (uid) {
-      const { data: prof } = await sb.from('profiles').select('full_name').eq('id', uid).maybeSingle();
-      actorName = (prof as { full_name?: string } | null)?.full_name ?? '';
+      const { data: prof } = await sb.from('profiles').select('full_name, role').eq('id', uid).maybeSingle();
+      const p = prof as { full_name?: string; role?: string } | null;
+      // نشاط المطور (super_admin) لا يظهر في سجل نشاطات المستخدمين — يبقى السجل
+      // خاصاً بعمليات صاحب السنتر وفريقه داخل سنتره فقط.
+      if (p?.role === 'super_admin') return;
+      actorName = p?.full_name ?? '';
     }
-await sb.from('activity_log').insert({
-       id: uuid(), center_id: centerId, actor_id: uid,
-       actor_name: actorName, action, details
-     });
+    await sb.from('activity_log').insert({
+      id: uuid(), center_id: centerId, actor_id: uid,
+      actor_name: actorName, action, details
+    });
   } catch {
     // السجل إضافي — لا يكسر العملية الأساسية أبداً
   }
@@ -467,15 +478,17 @@ export async function fetchMyCenter(centerId: string): Promise<Center | null> {
 
 export async function fetchGrades(centerId: string): Promise<Grade[]> {
   const { data, error } = await getSupabase()
-    .from('grades').select('*').eq('center_id', centerId).order('created_at');
+    .from('grades').select('*').eq('center_id', centerId).order('sort_order').order('created_at');
   if (error) throw error;
   return (data ?? []) as Grade[];
 }
 
 export async function addGrade(centerId: string, name: string): Promise<void> {
+  const { data: rows } = await getSupabase().from('grades').select('sort_order').eq('center_id', centerId);
+  const nextOrder = rows?.length ? Math.max(0, ...rows.map((r) => Number(r.sort_order) || 0)) + 1 : 0;
   const { error } = await getSupabase().from('grades').insert({
     id: uuid(), center_id: centerId, name: name.trim(),
-    academic_year: '', created_at: nowIso(),
+    academic_year: '', sort_order: nextOrder, created_at: nowIso(),
   });
   if (error) throw error;
 }
@@ -494,6 +507,24 @@ export async function deleteGrade(id: string): Promise<void> {
 export async function updateGrade(id: string, name: string): Promise<void> {
   const { error } = await getSupabase().from('grades').update({ name: name.trim() }).eq('id', id);
   if (error) throw error;
+}
+
+/** تحريك صف لأعلى/أسفل ضمن ترتيب المراحل */
+export async function moveGrade(id: string, dir: -1 | 1): Promise<void> {
+  const sb = getSupabase();
+  const { data: current } = await sb.from('grades').select('center_id, sort_order').eq('id', id).maybeSingle();
+  if (!current) return;
+  const order = current.sort_order;
+  const cmp = dir < 0 ? 'lt' : 'gt';
+  const { data: neighbor } = await sb.from('grades')
+    .select('id, sort_order').eq('center_id', current.center_id)
+    .neq('id', id)
+    .filter('sort_order', cmp, order)
+    .order('sort_order', { ascending: dir < 0 })
+    .limit(1).maybeSingle();
+  if (!neighbor) return;
+  await sb.from('grades').update({ sort_order: neighbor.sort_order }).eq('id', id);
+  await sb.from('grades').update({ sort_order: order }).eq('id', neighbor.id);
 }
 
 export async function fetchGroups(centerId: string): Promise<Group[]> {
@@ -642,7 +673,7 @@ export async function saveAttendance(
 
 export async function fetchDues(centerId: string, month: number, year: number): Promise<Due[]> {
   const { data, error } = await getSupabase().from('dues').select('*')
-    .eq('center_id', centerId).eq('month', month).eq('year', year);
+    .eq('center_id', centerId).eq('month', month).eq('due_year', year);
   if (error) throw error;
   return (data ?? []) as Due[];
 }
@@ -662,7 +693,7 @@ export async function generateDuesForGroup(
     .filter((s) => !existingKeys.has(s.id))
     .map((s) => ({
       id: uuid(), center_id: centerId, student_id: s.id, group_id: group.id,
-      month, year, amount, status: 'pending', created_at: nowIso(),
+      month, due_year: year, amount, status: 'pending', created_at: nowIso(),
     }));
   if (rows.length > 0) {
     const { error } = await getSupabase().from('dues').insert(rows);
@@ -732,7 +763,7 @@ export async function fetchAllPendingDues(centerId: string): Promise<Due[]> {
 /** مدفوعات شهر معين (للتقارير) */
 export async function fetchPaymentsForMonth(centerId: string, month: number, year: number): Promise<Payment[]> {
   const { data, error } = await getSupabase().from('payments').select('*')
-    .eq('center_id', centerId).eq('month', month).eq('year', year).order('payment_date', { ascending: false }).limit(500);
+    .eq('center_id', centerId).eq('month', month).eq('payment_year', year).order('payment_date', { ascending: false }).limit(500);
   if (error) throw error;
   return (data ?? []) as Payment[];
 }
@@ -740,7 +771,7 @@ export async function fetchPaymentsForMonth(centerId: string, month: number, yea
 /** درجات يدوية لشهر معين (للتقارير) */
 export async function fetchManualGradesForMonth(centerId: string, month: number, year: number): Promise<ManualGrade[]> {
   const { data, error } = await getSupabase().from('manual_grades').select('*')
-    .eq('center_id', centerId).eq('month', month).eq('year', year).limit(500);
+    .eq('center_id', centerId).eq('month', month).eq('grade_year', year).limit(500);
   if (error) throw error;
   return (data ?? []) as ManualGrade[];
 }
@@ -754,7 +785,7 @@ export async function fetchPaymentsForStudent(studentId: string): Promise<Paymen
 
 export async function fetchDuesForStudent(studentId: string): Promise<Due[]> {
   const { data, error } = await getSupabase().from('dues').select('*')
-    .eq('student_id', studentId).order('year', { ascending: false }).order('month', { ascending: false }).limit(60);
+    .eq('student_id', studentId).order('due_year', { ascending: false }).order('month', { ascending: false }).limit(60);
   if (error) throw error;
   return (data ?? []) as Due[];
 }
@@ -810,7 +841,7 @@ export async function addManualGrade(input: {
   const { error } = await getSupabase().from('manual_grades').insert({
     id: uuid(), center_id: input.centerId, student_id: input.studentId,
     title: input.title.trim() || 'تقييم', score: input.score, max_score: input.maxScore,
-    month: input.month, year: input.year, notes: input.notes?.trim() || null,
+    month: input.month, grade_year: input.year, notes: input.notes?.trim() || null,
     created_at: nowIso(),
   });
   if (error) throw error;
@@ -900,11 +931,19 @@ export async function fetchAdminStats(centerId: string): Promise<AdminStats> {
 // ------------------------------------------------------------
 
 export async function fetchMyAttendance(studentId: string): Promise<(Attendance & { sessions?: SessionRecord | null })[]> {
-  const { data, error } = await getSupabase().from('attendance')
-    .select('*, sessions(session_date, group_id)')
+  // نجلب الحضور ثم الحصص منفصلتين ونجمعهما هنا — بدل select مدمج يعتمد على
+  // علاقة foreign key بين attendance و sessions قد لا تكون معرفة في قاعدة البيانات.
+  const { data, error } = await getSupabase().from('attendance').select('*')
     .eq('student_id', studentId).order('created_at', { ascending: false }).limit(100);
   if (error) throw error;
-  return (data ?? []) as (Attendance & { sessions?: SessionRecord | null })[];
+  const rows = (data ?? []) as Attendance[];
+  const sessionIds = Array.from(new Set(rows.map((r) => r.session_id).filter(Boolean)));
+  if (sessionIds.length === 0) return rows;
+  const { data: sessions, error: sessErr } = await getSupabase().from('sessions').select('*')
+    .in('id', sessionIds);
+  if (sessErr) throw sessErr;
+  const byId = new Map((sessions ?? []).map((s) => [s.id, s as SessionRecord]));
+  return rows.map((r) => ({ ...r, sessions: byId.get(r.session_id) ?? null }));
 }
 
 // ------------------------------------------------------------
@@ -1016,6 +1055,9 @@ export async function upsertExam(centerId: string, exam: Partial<AppExam> & {
     answers,
     total_score: total,
     is_published: exam.is_published ?? false,
+    attempts_allowed: exam.attempts_allowed ?? 1,
+    show_result: exam.show_result ?? 'end',
+    ornaments: exam.ornaments ?? null,
   };
   if (exam.id) {
     const { error } = await getSupabase().from('app_exams').update(payload).eq('id', exam.id);
@@ -1045,14 +1087,24 @@ export async function fetchPublishedExams(): Promise<PublishedExam[]> {
   return (data ?? []) as PublishedExam[];
 }
 
-export async function submitExam(examId: string, answers: ExamAnswer[]): Promise<{
-  score: number; max_score: number; correct: number; total: number; status: string;
-}> {
+export interface ExamResult {
+  score: number;
+  max_score: number;
+  correct: number;
+  total: number;
+  status: string;
+  attempts_used?: number;
+  attempts_allowed?: number;
+  /** مراجعة سؤال بسؤال؛ model = الإجابة النموذجية (إن أُرفقت من الخادم) */
+  per_question?: { q: number; correct: boolean | null; earned: number; marks: number; model?: ExamAnswer }[];
+}
+
+export async function submitExam(examId: string, answers: ExamAnswer[]): Promise<ExamResult> {
   const { data, error } = await getSupabase().rpc('submit_exam_attempt', {
     p_exam_id: examId, p_answers: answers,
   });
   if (error) throw error;
-  return data as { score: number; max_score: number; correct: number; total: number; status: string };
+  return data as ExamResult;
 }
 
 /** تصحيح يدوي لمحاولة فيها مقالي (المعلم يضع الدرجة النهائية) */
@@ -1132,13 +1184,21 @@ export async function fetchActiveSurveys(centerId: string): Promise<AppSurvey[]>
 }
 
 export async function upsertSurvey(centerId: string, survey: Partial<AppSurvey> & {
-  title: string; questions: string[];
+  title: string; questions: SurveyQuestion[];
 }): Promise<void> {
   const payload = {
     center_id: centerId,
     title: survey.title.trim(),
-    questions: survey.questions.map((q) => q.trim()).filter(Boolean),
+    description: (survey.description ?? '').trim(),
+    questions: survey.questions,
+    audience: survey.audience ?? 'all',
+    grade_id: survey.audience === 'grade' ? survey.grade_id ?? null : null,
+    group_ids: survey.audience === 'group' ? survey.group_ids ?? [] : [],
     is_active: survey.is_active ?? true,
+    anonymous: survey.anonymous ?? false,
+    lock_after_submit: survey.lock_after_submit ?? false,
+    deadline: survey.deadline || null,
+    version: survey.version ?? 1,
   };
   if (survey.id) {
     const { error } = await getSupabase().from('app_surveys').update(payload).eq('id', survey.id);
@@ -1163,14 +1223,19 @@ export async function toggleSurvey(id: string, active: boolean): Promise<void> {
 }
 
 export async function submitSurveyResponse(input: {
-  centerId: string; surveyId: string; studentId: string; answers: string[];
+  centerId: string; surveyId: string; studentId: string; answers: Record<string, SurveyAnswer>;
+  lockAfterSubmit?: boolean;
 }): Promise<void> {
-  const { error } = await getSupabase().from('app_survey_responses').insert({
+  // ردّ واحد لكل طالب في كل استبيان: إن كان القفل مفعّلاً نرفض التكرار،
+  // وإلا نُحدّث ردّه السابق بدل إدراج صف ثانٍ.
+  const { error } = await getSupabase().from('app_survey_responses').upsert({
     id: uuid(), center_id: input.centerId, survey_id: input.surveyId,
     student_id: input.studentId, answers: input.answers,
-  });
+  }, { onConflict: 'survey_id,student_id' });
   if (error) {
-    if (String((error as any)?.message ?? '').includes('duplicate key')) throw new Error('already_answered');
+    if (input.lockAfterSubmit && String((error as any)?.message ?? '').includes('duplicate key')) {
+      throw new Error('already_answered');
+    }
     throw error;
   }
 }

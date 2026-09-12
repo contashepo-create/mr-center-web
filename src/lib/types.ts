@@ -77,6 +77,7 @@ export interface Grade {
   center_id: string;
   name: string;
   academic_year: string;
+  sort_order: number;
   created_at: string;
 }
 
@@ -120,7 +121,7 @@ export interface Due {
   student_id: string;
   group_id: string | null;
   month: number;
-  year: number;
+  due_year: number;
   amount: number;
   status: 'pending' | 'paid' | 'partial';
   created_at: string;
@@ -134,7 +135,7 @@ export interface Payment {
   amount: number;
   payment_date: string;
   month: number;
-  year: number;
+  payment_year: number;
   notes: string | null;
   created_at: string;
 }
@@ -173,7 +174,7 @@ export interface ManualGrade {
   score: number;
   max_score: number;
   month: number;
-  year: number;
+  grade_year: number;
   notes: string | null;
   created_at: string;
 }
@@ -237,10 +238,40 @@ export interface ExamQuestion {
   answer?: string;
   /** أزواج التوصيل (وصل) */
   pairs?: ExamPair[];
+  /** صورة السؤال (رابط خارجي أو رابط تخزين عام) */
+  image?: string | null;
+  /** مكان الصورة: بجانب السؤال (ورقي) أو فوق/تحت (إلكتروني) */
+  imagePosition?: 'beside' | 'above' | 'below';
+  /** عرض الصورة بالبكسل (80..600) */
+  imageSize?: number;
 }
 
 /** قيمة إجابة سؤال: فهرس / مصفوفة فهارس / نص / null لليدوي بلا نموذج */
 export type ExamAnswer = number | number[] | string | null;
+
+/** طريقة إظهار النتيجة للطالب */
+export type ExamResultMode = 'after_each' | 'end' | 'never';
+
+/** كثافة الزخارف حول الورقة */
+export type OrnamentDensity = 'low' | 'medium' | 'high';
+
+/** ختم زخرفة موضوع يدوياً على الورقة (كنسبة مئوية من أبعادها) */
+export interface OrnamentStamp {
+  id: string;
+  kind: string;
+  x: number; // 0..100
+  y: number; // 0..100
+  size: number; // px
+}
+
+/** إعدادات زخارف ورقة الاختبار */
+export interface ExamOrnaments {
+  placement: 'auto' | 'manual';
+  density: OrnamentDensity;
+  opacity: number; // 0..1
+  kinds: string[]; // الأنواع المختارة (تُعبأ تلقائياً حسب المادة)
+  stamps: OrnamentStamp[]; // أختام يدوية (وضع manual)
+}
 
 export interface AppExam {
   id: string;
@@ -253,6 +284,10 @@ export interface AppExam {
   answers: ExamAnswer[];
   total_score: number;
   is_published: boolean;
+  attempts_allowed: number;
+  show_result: ExamResultMode;
+  /** زخارف الورقة (اختياري — قد تكون غائبة في الاختبارات القديمة) */
+  ornaments?: ExamOrnaments | null;
   created_at: string;
 }
 
@@ -265,6 +300,9 @@ export interface PublishedExam {
   total_score: number;
   questions: ExamQuestion[];
   attempted: boolean;
+  attempts_allowed: number;
+  attempts_used: number;
+  show_result: ExamResultMode;
   created_at: string;
 }
 
@@ -306,12 +344,39 @@ export interface AppInquiry {
   updated_at: string;
 }
 
+export type SurveyQuestionType = 'single' | 'multi' | 'rating' | 'yesno' | 'text';
+export type SurveyAudience = 'all' | 'grade' | 'group';
+
+export interface SurveyQuestion {
+  id: string;
+  type: SurveyQuestionType;
+  title: string;
+  required?: boolean;
+  options?: string[];
+  maxRating?: number;
+  placeholder?: string;
+}
+
+export interface SurveyAnswer {
+  choice?: string[];
+  text?: string;
+  rating?: number;
+}
+
 export interface AppSurvey {
   id: string;
   center_id: string;
   title: string;
-  questions: string[];
+  description?: string;
+  audience: SurveyAudience;
+  grade_id: string | null;
+  group_ids: string[];
+  questions: SurveyQuestion[];
   is_active: boolean;
+  anonymous: boolean;
+  lock_after_submit: boolean;
+  deadline: string | null;
+  version: number;
   created_at: string;
 }
 
@@ -320,7 +385,7 @@ export interface AppSurveyResponse {
   center_id: string;
   survey_id: string;
   student_id: string;
-  answers: string[];
+  answers: Record<string, SurveyAnswer>;
   created_at: string;
 }
 

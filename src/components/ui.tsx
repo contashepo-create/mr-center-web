@@ -64,7 +64,7 @@ export function Badge({ children, tone = 'default' }: { children: React.ReactNod
   return <span className={`badge ${tone !== 'default' ? tone : ''}`}>{children}</span>;
 }
 
-export function Notice({ children, tone = 'default' }: { children: React.ReactNode; tone?: 'default' | 'success' | 'warn' | 'error' }) {
+export function Notice({ children, tone = 'default' }: { children: React.ReactNode; tone?: 'default' | 'success' | 'warn' | 'error' | 'info' }) {
   return <div className={`notice ${tone}`}>{children}</div>;
 }
 

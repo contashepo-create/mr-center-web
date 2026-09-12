@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader, Select } from '@/components/ui';
+import { Modal } from '@/components/modal';
+import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
 import { isOwner } from '@/lib/rbac';
 import { getSupabase } from '@/lib/supabase';
@@ -31,6 +33,7 @@ function label(status: Custody['status']) {
 
 export default function CustodyPage() {
   const { profile, features } = useSession();
+  const toast = useToast();
   const centerId = profile?.center_id;
   const [rows, setRows] = useState<Custody[]>([]);
   const [staff, setStaff] = useState<Profile[]>([]);
@@ -38,9 +41,10 @@ export default function CustodyPage() {
   const [notes, setNotes] = useState('');
   const [reviewNotes, setReviewNotes] = useState('');
   const [filterStaff, setFilterStaff] = useState('all');
+  const [open, setOpen] = useState(false);
+  const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const staffAllowed = profile?.role === 'secretary' || profile?.role === 'manager';
   const staffName = useMemo(() => new Map(staff.map((s) => [s.id, s.full_name])), [staff]);
   const visible = rows.filter((r) => filterStaff === 'all' || r.staff_id === filterStaff);
@@ -70,11 +74,13 @@ export default function CustodyPage() {
     return <Card><Notice tone="error">العهدة متاحة لصاحب السنتر والمدير/السكرتير فقط.</Notice></Card>;
   }
 
+  const openSubmit = () => { setAmount(''); setNotes(''); setDirty(false); setError(null); setOpen(true); };
+
   const submitCustody = async (e: React.FormEvent) => {
     e.preventDefault();
     const value = Number(amount);
     if (!value || value < 0) return setError(new Error('أدخل المبلغ المسلم'));
-    setBusy(true); setError(null); setMessage(null);
+    setBusy(true); setError(null);
     try {
       const { error } = await getSupabase().rpc('submit_staff_custody', {
         p_staff: profile!.id,
@@ -83,25 +89,29 @@ export default function CustodyPage() {
         p_notes: notes.trim(),
       });
       if (error) throw error;
-      setAmount(''); setNotes(''); setMessage('تم تسجيل عهدة اليوم ومطابقتها مع تحصيلك.'); await load();
+      setAmount(''); setNotes(''); setDirty(false); setOpen(false);
+      toast.success('تم تسجيل العهدة', 'سُجلت عهدة اليوم وطوبقت مع تحصيلك.');
+      await load();
     } catch (err) { setError(err); }
     finally { setBusy(false); }
   };
 
   const review = async (id: string, status: Custody['status']) => {
-    setError(null); setMessage(null);
+    setError(null);
     try {
       const { error } = await getSupabase().rpc('review_staff_custody', { p_id: id, p_status: status, p_notes: reviewNotes.trim() });
       if (error) throw error;
-      setReviewNotes(''); setMessage('تم تحديث حالة العهدة.'); await load();
+      setReviewNotes('');
+      toast.success('تم تحديث حالة العهدة');
+      await load();
     } catch (err) { setError(err); }
   };
 
   const ownerReview = isOwner(profile) && !!features?.accounting;
 
   return <>
-    <PageHeader title="عهدة التحصيل" subtitle="مطابقة يومية بين تحصيل الموظفين والمبالغ المسلمة." />
-    <ErrorNotice error={error} />{message ? <Notice tone="success">{message}</Notice> : null}
+    <PageHeader title="عهدة التحصيل" subtitle="مطابقة يومية بين تحصيل الموظفين والمبالغ المسلمة." actions={staffAllowed ? <Button type="button" onClick={openSubmit}>+ تسليم عهدة اليوم</Button> : undefined} />
+    <ErrorNotice error={error} />
     {isOwner(profile) && !features?.accounting ? (
       <div style={{ marginBottom: 16 }}><Notice tone="warn">المحاسبة غير مفعلة لسنترك حالياً — تُعتمد العهد المسلمة تلقائياً كأنها سليمة وتُسجل الإيرادات في الخلفية. فعّل الخدمة من الإدارة للاطلاع على الدفتر المالي.</Notice></div>
     ) : null}
@@ -110,10 +120,25 @@ export default function CustodyPage() {
       <Card className="compact kpi"><span className="muted">مسلم الشهر</span><div className="kpi-value">{formatMoney(monthDelivered)}</div></Card>
       <Card className="compact kpi"><span className="muted">الفرق</span><div className="kpi-value">{formatMoney(monthDelivered - monthExpected)}</div></Card>
     </div>
-    <div className="grid grid-2">
-      {staffAllowed ? <Card className="stack"><h2 className="h3">تسليم عهدة اليوم</h2><form className="stack" onSubmit={submitCustody}><Input label={`المبلغ المسلم — ${todayIso()}`} type="number" value={amount} onChange={(e) => setAmount(e.target.value)} /><Input label="ملاحظات" value={notes} onChange={(e) => setNotes(e.target.value)} /><Button disabled={busy} type="submit">تسجيل وتسليم</Button></form></Card> : null}
-      <Card className="stack"><h2 className="h3">فلترة واعتماد</h2><Select label="الموظف" value={filterStaff} onChange={(e) => setFilterStaff(e.target.value)}><option value="all">الكل</option>{staff.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}</Select>{ownerReview ? <Input label="ملاحظات الاعتماد" value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} /> : null}</Card>
-    </div>
+    <Card className="stack"><h2 className="h3">فلترة واعتماد</h2><Select label="الموظف" value={filterStaff} onChange={(e) => setFilterStaff(e.target.value)}><option value="all">الكل</option>{staff.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}</Select>{ownerReview ? <Input label="ملاحظات الاعتماد" value={reviewNotes} onChange={(e) => setReviewNotes(e.target.value)} /> : null}</Card>
     <Card className="stack" style={{ marginTop: 18 }}><div className="row-between"><h2 className="h3">سجل العهد</h2><Badge tone="info">{visible.length}</Badge></div>{visible.length === 0 ? <EmptyState title="لا توجد عهد مسجلة" /> : <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>المتوقع</th><th>المسلم</th><th>الحالة</th><th>ملاحظات</th><th>اعتماد</th></tr></thead><tbody>{visible.map((r) => { const [txt, tone] = label(r.status); return <tr key={r.id}><td>{formatDate(r.custody_date)}</td><td>{staffName.get(r.staff_id) ?? r.staff_id}</td><td>{formatMoney(r.expected_amount)}</td><td>{formatMoney(r.delivered_amount)}</td><td><Badge tone={tone}>{txt}</Badge></td><td>{r.notes || '—'}</td><td>{ownerReview ? <div className="row"><Button type="button" variant="secondary" onClick={() => void review(r.id, 'matched')}>مطابقة</Button><Button type="button" variant="secondary" onClick={() => void review(r.id, 'shortage')}>عجز</Button><Button type="button" variant="secondary" onClick={() => void review(r.id, 'surplus')}>زيادة</Button></div> : '—'}</td></tr>; })}</tbody></table></div>}</Card>
+
+    <Modal
+      open={open}
+      title="تسليم عهدة اليوم"
+      subtitle={todayIso()}
+      dirty={dirty}
+      onClose={() => setOpen(false)}
+      onSave={() => void submitCustody({ preventDefault: () => {} } as React.FormEvent)}
+      saveLabel={busy ? 'جاري الحفظ...' : 'تسجيل وتسليم'}
+      footer={<Button disabled={busy} type="submit" form="custody-form">{busy ? 'جاري الحفظ...' : 'تسجيل وتسليم'}</Button>}
+    >
+      <form id="custody-form" className="stack" onSubmit={submitCustody}>
+        <Input label={`المبلغ المسلم — ${todayIso()}`} type="number" value={amount} onChange={(e) => { setAmount(e.target.value); setDirty(true); }} />
+        <Input label="ملاحظات" value={notes} onChange={(e) => { setNotes(e.target.value); setDirty(true); }} />
+        <Notice>سيُطابق المبلغ المسلم تلقائياً مع تحصيلك المسجل اليوم في خلفية النظام.</Notice>
+        <ErrorNotice error={error} />
+      </form>
+    </Modal>
   </>;
 }

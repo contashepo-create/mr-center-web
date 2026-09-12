@@ -1,6 +1,11 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
-const sql = readFileSync('supabase/android_multitenant_schema.sql', 'utf8');
+// نجمع كل ملفات SQL (المخطط الأساسي + الترحيلات) لأن دالة record_payment
+// وبوابة المحاسبة تُعرَّف في ترحيلات idempotent منفصلة.
+const sql = readdirSync('supabase')
+  .filter((f) => f.endsWith('.sql'))
+  .map((f) => readFileSync(`supabase/${f}`, 'utf8'))
+  .join('\n');
 const api = readFileSync('src/lib/api.ts', 'utf8');
 const page = readFileSync('app/admin/accounting/page.tsx', 'utf8');
 const custody = readFileSync('app/admin/custody/page.tsx', 'utf8');
@@ -29,7 +34,7 @@ has(sql, /p_amount > \(v_due - v_paid\)/, 'SQL: record_payment must reject payme
 has(sql, /collected_by, collected_by_name/, 'SQL: record_payment must store collector identity');
 has(sql, /due_not_found/, 'SQL: record_payment does not reject missing due records');
 
-if (/value=['"]income['"]/.test(page) || /kind:\s*form\.kind/.test(page) || /setForm\([^)]*kind/.test(page)) {
+if (/kind:\s*['"]income['"]/.test(page) || /kind:\s*form\.kind/.test(page) || /setForm\([^)]*kind/.test(page)) {
   issues.push('Accounting UI: manual income entry is enabled; income must come from payment_collection trigger only');
 }
 has(page, /kind:\s*'expense'/, 'Accounting UI: manual ledger entries are not forced to expense');

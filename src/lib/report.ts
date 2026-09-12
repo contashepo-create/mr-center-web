@@ -27,8 +27,7 @@ export function buildReportHtml(title: string, subtitle: string, sections: Repor
   </style></head><body>
     <h1>${esc(title)}</h1><div class="sub">${esc(subtitle)}</div>
     <div class="meta">${operator?.center ? `السنتر: ${esc(operator.center)} · ` : ''}نفذ التقرير: ${esc(operator?.name || 'غير محدد')} · وقت الطباعة: ${esc(operator?.printedAt || new Date().toLocaleString('ar-EG'))}</div>
-    ${body}<script>window.onload=()=>setTimeout(()=>window.print(),300)</script>
-  </body></html>`;
+    ${body}</body></html>`;
 }
 
 export function buildPayrollReportHtml(employee: { name: string; role?: string }, period: string, values: { base: number; bonus: number; advances: number; deductions: number; net: number }, operator?: { name?: string; center?: string }): string {
@@ -55,9 +54,45 @@ export function buildCustodyReportHtml(title: string, period: string, rows: stri
 }
 
 export function printReport(html: string): void {
-  const w = window.open('', '_blank', 'noopener,noreferrer,width=1000,height=800');
-  if (!w) throw new Error('تعذر فتح نافذة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع.');
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
+  // طباعة عبر iframe مخفي داخل نفس الصفحة — لا تعتمد على النوافذ المنبثقة
+  // (المتصفحات تحجب window.open فلا تعمل أزرار الطباعة/PDF).
+  const prev = document.getElementById('print-frame');
+  if (prev) prev.remove();
+
+  const frame = document.createElement('iframe');
+  frame.id = 'print-frame';
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+  document.body.appendChild(frame);
+
+  const doc = frame.contentDocument ?? frame.contentWindow?.document;
+  if (!doc) {
+    // مسار احتياطي: نافذة جديدة
+    const w = window.open('', '_blank');
+    if (!w) throw new Error('تعذر فتح نافذة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع.');
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+    return;
+  }
+
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  const cleanup = () => setTimeout(() => frame.remove(), 1500);
+  try {
+    frame.contentWindow?.addEventListener('afterprint', cleanup, { once: true });
+  } catch {
+    /* تجاهل */
+  }
+  // انتظر تحميل محتوى الإطار ثم اطبع
+  setTimeout(() => {
+    try {
+      frame.contentWindow?.focus();
+      frame.contentWindow?.print();
+    } catch {
+      cleanup();
+    }
+  }, 400);
 }

@@ -6,6 +6,7 @@ import { Badge, Card, EmptyState, ErrorNotice, LinkButton, PageHeader } from '@/
 import { useSession } from '@/context/session';
 import { fetchAdminStats, fetchAnnouncements, fetchMyCenter, type AdminStats } from '@/lib/api';
 import { planLabel } from '@/lib/billing';
+import { isOwner } from '@/lib/rbac';
 import type { Announcement, Center } from '@/lib/types';
 import { formatDate, formatMoney } from '@/lib/utils';
 
@@ -52,16 +53,18 @@ export default function AdminDashboardPage() {
       </div>
 
       <div className="grid grid-2">
-        <Card className="stack">
-          <div className="row-between">
-            <h2 className="h3">الاشتراك</h2>
-            <Badge tone={subscription?.status === 'active' ? 'success' : 'warn'}>{subscription?.status ?? '—'}</Badge>
-          </div>
-          <p className="muted">الباقة: <b>{planLabel(subscription?.plan_type)}</b></p>
-          <p className="muted">ينتهي في: <b>{subscription?.ends_on ? formatDate(subscription.ends_on) : '—'}</b></p>
-          {typeof subscription?.days_left === 'number' ? <p className="muted">المتبقي: <b>{subscription.days_left}</b> يوم</p> : null}
-          <LinkButton href="/admin/subscription" variant="secondary">إدارة الاشتراك</LinkButton>
-        </Card>
+        {isOwner(profile) ? (
+          <Card className="stack">
+            <div className="row-between">
+              <h2 className="h3">الاشتراك</h2>
+              <Badge tone={subscription?.status === 'active' ? 'success' : 'warn'}>{subscription?.status ?? '—'}</Badge>
+            </div>
+            <p className="muted">الباقة: <b>{planLabel(subscription?.plan_type)}</b></p>
+            <p className="muted">ينتهي في: <b>{subscription?.ends_on ? formatDate(subscription.ends_on) : '—'}</b></p>
+            {typeof subscription?.days_left === 'number' ? <p className="muted">المتبقي: <b>{subscription.days_left}</b> يوم</p> : null}
+            <LinkButton href="/admin/subscription" variant="secondary">إدارة الاشتراك</LinkButton>
+          </Card>
+        ) : null}
 
         <Card className="stack">
           <div className="row-between">

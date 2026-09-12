@@ -3,6 +3,7 @@ import './globals.css';
 import { SessionProvider } from '@/context/session';
 import { CookieConsent } from '@/components/cookie-consent';
 import { VisitorTracker } from '@/components/visitor-tracker';
+import { ToastProvider } from '@/components/toast';
 
 const themeInit = `(function(){try{var s=localStorage.getItem('mrcenter.theme');var m=s?JSON.parse(s).mode:null;if(m!=='light'&&m!=='dark'){m=window.matchMedia&&window.matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';}document.documentElement.setAttribute('data-theme',m);}catch(e){document.documentElement.setAttribute('data-theme','dark');}})();`;
 
@@ -16,8 +17,8 @@ export const viewport: Viewport = {
   width: 'device-width',
   initialScale: 1,
   themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#f4f2ec' },
-    { media: '(prefers-color-scheme: dark)', color: '#0a0b07' },
+    { media: '(prefers-color-scheme: light)', color: '#f5f7fb' },
+    { media: '(prefers-color-scheme: dark)', color: '#0a0f1c' },
   ],
 };
 
@@ -26,7 +27,9 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
     <html lang="ar" dir="rtl" suppressHydrationWarning>
       <body>
         <script>{themeInit}</script>
-        <SessionProvider>{children}</SessionProvider>
+        <SessionProvider>
+          <ToastProvider>{children}</ToastProvider>
+        </SessionProvider>
         <CookieConsent />
         <VisitorTracker />
       </body>

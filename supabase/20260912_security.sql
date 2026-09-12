@@ -49,7 +49,7 @@ BEGIN
 
   SELECT full_name INTO v_name FROM public.profiles WHERE id = v_actor;
 
-  INSERT INTO public.payments(id, center_id, student_id, due_id, amount, payment_date, month, year, notes, collected_by, collected_by_name, created_at)
+  INSERT INTO public.payments(id, center_id, student_id, due_id, amount, payment_date, month, payment_year, notes, collected_by, collected_by_name, created_at)
   VALUES (v_pid, p_center, p_student, nullif(p_due, ''), p_amount, CURRENT_DATE, p_month, p_year, nullif(p_notes, ''), v_actor, COALESCE(v_name, ''), now());
 
   IF v_has_due THEN
