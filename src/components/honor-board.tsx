@@ -11,7 +11,16 @@ import { formatDate } from '@/lib/utils';
 
 const MEDALS = ['🥇', '🥈', '🥉'];
 
-export function HonorBoard({ honors, highlightName }: { honors: Honoree[]; highlightName?: string | null }) {
+/** توحيد الاسم للمقارنة: إزالة التشكيل والتطويل والمسافات الزائدة */
+function normalizeName(s: string): string {
+  return s
+    .trim()
+    .replace(/[\u064B-\u0652\u0670\u0640]/g, '')
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+export function HonorBoard({ honors, highlightName, highlightStudentId }: { honors: Honoree[]; highlightName?: string | null; highlightStudentId?: string | null }) {
   if (honors.length === 0) {
     return <EmptyState title="لا توجد تكريمات بعد" />;
   }
@@ -19,7 +28,10 @@ export function HonorBoard({ honors, highlightName }: { honors: Honoree[]; highl
     <div className="honor-board">
       {honors.map((h, i) => {
         const isTop = i < 3;
-        const isMe = highlightName && h.student_id && highlightName.length > 0 && (h.name.includes(highlightName) || highlightName.includes(h.name));
+        const idMatch = !!highlightStudentId && !!h.student_id && h.student_id === highlightStudentId;
+        const nameMatch = !!highlightName && !!h.name && highlightName.length > 0
+          && normalizeName(h.name) === normalizeName(highlightName);
+        const isMe = idMatch || nameMatch;
         return (
           <div
             key={h.id}
