@@ -83,6 +83,7 @@ const studentNav: NavItem[] = [
   { href: '/student', label: 'الرئيسية', icon: '⌂' },
   { href: '/student/attendance', label: 'حضوري', icon: '✓' },
   { href: '/student/grades', label: 'درجاتي', icon: '★' },
+  { href: '/student/report', label: 'تقريري', icon: '🧾' },
   { href: '/student/payments', label: 'مدفوعاتي', icon: '💳' },
   { href: '/student/exams', label: 'اختباراتي', icon: '📝' },
   { href: '/student/surveys', label: 'استبياناتي', icon: '📋' },

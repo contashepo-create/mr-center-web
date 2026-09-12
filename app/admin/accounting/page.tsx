@@ -123,6 +123,7 @@ export default function AccountingPage() {
   const [expenseDirty, setExpenseDirty] = useState(false);
   const [commissionOpen, setCommissionOpen] = useState(false);
   const [commissionDirty, setCommissionDirty] = useState(false);
+  const [tab, setTab] = useState<'ledger' | 'staff' | 'commissions' | 'reports'>('ledger');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
@@ -268,49 +269,82 @@ export default function AccountingPage() {
   }, { name: profile?.full_name }));
 
   return <>
-    <PageHeader title="المحاسبة" subtitle="دفتر مالي: إيرادات التحصيل آلية، والمصروفات/الرواتب/السلف يضيفها صاحب السنتر فقط." actions={<Button type="button" variant="secondary" onClick={printFinancial}>طباعة تقرير مالي</Button>} />
+    <PageHeader title="المحاسبة" subtitle="منظومة مالية متكاملة: دفتر عام، موظفون وسلفيات، عمولات، تقارير وقوائم مالية." actions={<Button type="button" variant="secondary" onClick={printFinancial}>طباعة تقرير مالي</Button>} />
     <ErrorNotice error={error} />
     {yearMsg ? <Notice tone="success">{yearMsg}</Notice> : null}
-    <Card className="stack" style={{ marginBottom: 18 }}>
-      <div className="row-between">
-        <h2 className="h3">السنة المالية</h2>
-        {years.some((y) => y.status === 'open') ? (
-          <Button type="button" variant="secondary" disabled={closing} onClick={closeYear}>{closing ? 'جارٍ الإغلاق...' : 'إغلاق السنة وفتح سنة جديدة'}</Button>
-        ) : null}
-      </div>
-      {years.length === 0 ? <EmptyState title="لا توجد سنوات مالية" body="تُنشأ السنة المالية تلقائياً مع إنشاء السنتر." /> : (
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>السنة</th><th>تبدأ</th><th>تنتهي</th><th>الحالة</th><th>رصيد افتتاحي</th><th>إيرادات</th><th>مصروفات</th><th>رصيد الختام</th><th>مستحقات معلقة</th></tr></thead>
-            <tbody>
-              {years.map((y) => (
-                <tr key={y.id}>
-                  <td><strong>{y.year_label}</strong></td>
-                  <td>{formatDate(y.starts_on)}</td>
-                  <td>{y.ends_on ? formatDate(y.ends_on) : '—'}</td>
-                  <td><Badge tone={y.status === 'open' ? 'success' : 'default'}>{y.status === 'open' ? 'مفتوحة' : 'مغلقة'}</Badge></td>
-                  <td>{formatMoney(y.opening_balance)}</td>
-                  <td>{y.closing_income === null ? '—' : formatMoney(y.closing_income)}</td>
-                  <td>{y.closing_expense === null ? '—' : formatMoney(y.closing_expense)}</td>
-                  <td><strong>{y.closing_balance === null ? '—' : formatMoney(y.closing_balance)}</strong></td>
-                  <td>{y.closing_pending_dues === null ? '—' : formatMoney(y.closing_pending_dues)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+    <div className="tabs" style={{ marginBottom: 18 }}>
+      <button className={`tab ${tab === 'ledger' ? 'active' : ''}`} onClick={() => setTab('ledger')}>📒 الدفتر العام</button>
+      <button className={`tab ${tab === 'staff' ? 'active' : ''}`} onClick={() => setTab('staff')}>🧑‍💼 الموظفون والسلفيات</button>
+      <button className={`tab ${tab === 'commissions' ? 'active' : ''}`} onClick={() => setTab('commissions')}>🤝 العمولات</button>
+      <button className={`tab ${tab === 'reports' ? 'active' : ''}`} onClick={() => setTab('reports')}>📊 التقارير والقوائم المالية</button>
+    </div>
+
+    {/* ===== تبويب الدفتر العام ===== */}
+    {tab === 'ledger' ? (
+      <>
+        <div className="grid grid-4" style={{ marginBottom: 18 }}><Card className="compact kpi"><span className="muted">الإيرادات</span><div className="kpi-value">{formatMoney(totals.income)}</div></Card><Card className="compact kpi"><span className="muted">المصروفات</span><div className="kpi-value">{formatMoney(totals.expense)}</div></Card><Card className="compact kpi"><span className="muted">الصافي</span><div className="kpi-value">{formatMoney(totals.income - totals.expense)}</div></Card><Card className="compact kpi"><span className="muted">حركات الفترة</span><div className="kpi-value">{filteredRows.length}</div></Card></div>
+        <div className="grid grid-2">
+          <Card className="stack"><h2 className="h3">فلترة الفترة</h2><div className="grid grid-2"><Input label="من تاريخ" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /><Input label="إلى تاريخ" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></div><Notice>مصدر الإيراد الوحيد هو `payment_collection` الناتج تلقائياً من دفعات الطلاب؛ هذا يمنع تكرار الإيرادات محاسبياً.</Notice></Card>
+          <Card className="stack"><h2 className="h3">تسجيل مصروف</h2><div className="notice">سجّل مصروفاً عاماً أو راتباً أو سلفة أو مكافأة عبر نموذج منبثق آمن.</div><Button type="button" onClick={() => { setExpenseDirty(false); setError(null); setExpenseOpen(true); }}>+ تسجيل مصروف</Button></Card>
         </div>
-      )}
-    </Card>
-    <div className="grid grid-4" style={{ marginBottom: 18 }}><Card className="compact kpi"><span className="muted">الإيرادات</span><div className="kpi-value">{formatMoney(totals.income)}</div></Card><Card className="compact kpi"><span className="muted">المصروفات</span><div className="kpi-value">{formatMoney(totals.expense)}</div></Card><Card className="compact kpi"><span className="muted">الصافي</span><div className="kpi-value">{formatMoney(totals.income - totals.expense)}</div></Card><Card className="compact kpi"><span className="muted">حركات الفترة</span><div className="kpi-value">{filteredRows.length}</div></Card></div>
-    <div className="grid grid-2">
-      <Card className="stack"><h2 className="h3">فلترة الفترة</h2><div className="grid grid-2"><Input label="من تاريخ" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} /><Input label="إلى تاريخ" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} /></div><Notice>مصدر الإيراد الوحيد هو `payment_collection` الناتج تلقائياً من دفعات الطلاب؛ هذا يمنع تكرار الإيرادات محاسبياً.</Notice></Card>
-      <Card className="stack"><h2 className="h3">مصروف جديد</h2><div className="notice">اضغط الزر بالأسفل لفتح نموذج منبثق لتسجيل مصروف أو راتب أو سلفة أو مكافأة.</div><Button type="button" onClick={() => { setExpenseDirty(false); setError(null); setExpenseOpen(true); }}>+ تسجيل مصروف</Button></Card>
-    </div>
-    <div className="grid grid-2" style={{ marginTop: 18 }}>
-      <Card className="stack"><div className="row-between"><h2 className="h3">عمولات التحصيل</h2><Button type="button" variant="secondary" onClick={() => { setCommissionDirty(false); setError(null); setCommissionOpen(true); }}>+ قاعدة عمولة</Button></div>{collectorTotals.length === 0 ? <EmptyState title="لا يوجد تحصيل موظفين في الفترة" /> : collectorTotals.map((c) => <div key={c.id} className="row-between card compact soft"><span>{c.name}</span><span>{formatMoney(c.total)}</span><Badge tone="success">عمولة {formatMoney(c.commission)} · {c.rate}%</Badge></div>)}</Card>
-      <Card className="stack"><h2 className="h3">كشف الرواتب والسلفيات</h2>{payroll.length === 0 ? <EmptyState title="لا توجد حركات رواتب في الفترة" /> : payroll.map((p) => <div key={p.id} className="card compact soft stack"><div className="row-between"><strong>{p.full_name}</strong><Badge>{roleLabel(p.role)}</Badge></div><p className="muted small">راتب: {formatMoney(p.salary)} · سلف: {formatMoney(p.advance)} · مكافآت/عمولات: {formatMoney(p.bonus)} · خصومات: {formatMoney(p.deduction)}</p><div className="row-between"><strong>الصافي: {formatMoney(p.net)}</strong><Button type="button" variant="secondary" onClick={() => printPayroll(p)}>كشف راتب PDF</Button></div></div>)}</Card>
-    </div>
-    <Card className="stack" style={{ marginTop: 18 }}><div className="row-between"><h2 className="h3">سجل الحركات</h2><Badge tone="info">{filteredRows.length}</Badge></div>{filteredRows.length === 0 ? <EmptyState title="لا توجد حركات" /> : <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>الموظف/المنفذ</th><th>المبلغ</th><th>المصدر</th></tr></thead><tbody>{filteredRows.map((r) => <tr key={r.id}><td>{formatDate(r.occurred_on)}</td><td><Badge tone={r.kind === 'income' ? 'success' : 'warn'}>{r.kind === 'income' ? 'إيراد' : 'مصروف'}</Badge></td><td>{ENTRY_LABEL[r.entry_type] ?? r.entry_type}<div className="tiny muted">{r.category}{r.description ? ` — ${r.description}` : ''}</div></td><td>{staffName.get(r.employee_id ?? '') ?? r.created_by_name ?? '—'}</td><td>{formatMoney(r.amount)}</td><td>{r.source_payment_id ? 'دفعة طالب' : 'يدوي'}</td></tr>)}</tbody></table></div>}</Card>
+        <Card className="stack" style={{ marginTop: 18 }}><div className="row-between"><h2 className="h3">سجل الحركات</h2><Badge tone="info">{filteredRows.length}</Badge></div>{filteredRows.length === 0 ? <EmptyState title="لا توجد حركات" /> : <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>الموظف/المنفذ</th><th>المبلغ</th><th>المصدر</th></tr></thead><tbody>{filteredRows.map((r) => <tr key={r.id}><td>{formatDate(r.occurred_on)}</td><td><Badge tone={r.kind === 'income' ? 'success' : 'warn'}>{r.kind === 'income' ? 'إيراد' : 'مصروف'}</Badge></td><td>{ENTRY_LABEL[r.entry_type] ?? r.entry_type}<div className="tiny muted">{r.category}{r.description ? ` — ${r.description}` : ''}</div></td><td>{staffName.get(r.employee_id ?? '') ?? r.created_by_name ?? '—'}</td><td>{formatMoney(r.amount)}</td><td>{r.source_payment_id ? 'دفعة طالب' : 'يدوي'}</td></tr>)}</tbody></table></div>}</Card>
+      </>
+    ) : null}
+
+    {/* ===== تبويب الموظفون والسلفيات ===== */}
+    {tab === 'staff' ? (
+      <>
+        <Card className="stack"><div className="row-between"><h2 className="h3">كشف الرواتب والسلفيات والخصومات</h2><Badge tone="info">{payroll.length} موظف</Badge></div>{payroll.length === 0 ? <EmptyState title="لا توجد حركات رواتب في الفترة" body="سجّل راتباً أو سلفة من تبويب الدفتر العام وستظهر تفاصيل الموظف هنا فوراً." /> : payroll.map((p) => <div key={p.id} className="card compact soft stack"><div className="row-between"><strong>{p.full_name}</strong><Badge>{roleLabel(p.role)}</Badge></div><div className="grid grid-3"><div className="notice">الراتب: <b>{formatMoney(p.salary)}</b></div><div className="notice">السلفيات: <b>{formatMoney(p.advance)}</b></div><div className="notice">الخصومات: <b>{formatMoney(p.deduction)}</b></div><div className="notice">المكافآت/العمولات: <b>{formatMoney(p.bonus)}</b></div><div className="notice" style={{ gridColumn: 'span 2' }}>الصافي المستحق: <b style={{ color: 'var(--accent)' }}>{formatMoney(p.net)}</b></div></div><div className="row-between"><span className="tiny muted">الصافي = الراتب + المكافآت − السلف − الخصومات</span><Button type="button" variant="secondary" onClick={() => printPayroll(p)}>كشف راتب PDF</Button></div></div>)}</Card>
+        <Card className="stack" style={{ marginTop: 18 }}><h2 className="h3">تحصيل الموظفين في الفترة</h2>{collectorTotals.length === 0 ? <EmptyState title="لا يوجد تحصيل موظفين في الفترة" /> : <div className="table-wrap"><table><thead><tr><th>الموظف</th><th>إجمالي التحصيل</th><th>نسبة العمولة</th><th>قيمة العمولة</th></tr></thead><tbody>{collectorTotals.map((c) => <tr key={c.id}><td>{c.name}</td><td>{formatMoney(c.total)}</td><td>{c.rate}%</td><td><strong>{formatMoney(c.commission)}</strong></td></tr>)}</tbody></table></div>}</Card>
+      </>
+    ) : null}
+
+    {/* ===== تبويب العمولات ===== */}
+    {tab === 'commissions' ? (
+      <Card className="stack"><div className="row-between"><h2 className="h3">قواعد عمولات التحصيل</h2><Button type="button" variant="secondary" onClick={() => { setCommissionDirty(false); setError(null); setCommissionOpen(true); }}>+ قاعدة عمولة</Button></div>{rules.length === 0 ? <EmptyState title="لا توجد قواعد عمولة" body="حدد نسبة لكل موظف من تحصيلاته حتى تُحتسب عمولته آلياً." /> : <div className="table-wrap"><table><thead><tr><th>الموظف</th><th>النسبة</th><th>تبدأ</th><th>تنتهي</th><th>الحالة</th></tr></thead><tbody>{rules.map((r) => <tr key={r.id}><td>{staffName.get(r.staff_id) ?? r.staff_id}</td><td>{r.rate}%</td><td>{formatDate(r.starts_on)}</td><td>{r.ends_on ? formatDate(r.ends_on) : 'مفتوحة'}</td><td><Badge tone={r.is_active ? 'success' : 'default'}>{r.is_active ? 'مفعلة' : 'موقوفة'}</Badge></td></tr>)}</tbody></table></div>}</Card>
+    ) : null}
+
+    {/* ===== تبويب التقارير والقوائم المالية ===== */}
+    {tab === 'reports' ? (
+      <>
+        <div className="grid grid-2">
+          <Card className="stack"><h2 className="h3">قائمة الدخل</h2><div className="table-wrap"><table><tbody><tr><td>الإيرادات</td><td><strong>{formatMoney(totals.income)}</strong></td></tr><tr><td>المصروفات</td><td><strong>{formatMoney(totals.expense)}</strong></td></tr><tr><td>صافي الربح/الخسارة</td><td><strong style={{ color: totals.income - totals.expense >= 0 ? 'var(--accent)' : 'var(--danger)' }}>{formatMoney(totals.income - totals.expense)}</strong></td></tr></tbody></table></div><Button type="button" variant="secondary" onClick={printFinancial}>طباعة التقرير المالي PDF</Button></Card>
+          <Card className="stack"><h2 className="h3">تصدير</h2><Notice>كل التقارير تُطبع بنافذة طباعة المتصفح وتُحفظ PDF مباشرة — تعمل الآن دون الحاجة للسماح بالنوافذ المنبثقة.</Notice><Button type="button" variant="secondary" onClick={() => printReport(buildReportHtml('قائمة الرواتب', `${fromDate || 'البداية'} — ${toDate || 'اليوم'}`, [{ title: 'الرواتب', headers: ['الموظف', 'الدور', 'الراتب', 'السلف', 'المكافآت', 'الخصومات', 'الصافي'], rows: payroll.map((p) => [p.full_name, roleLabel(p.role), formatMoney(p.salary), formatMoney(p.advance), formatMoney(p.bonus), formatMoney(p.deduction), formatMoney(p.net)]) }], { name: profile?.full_name }))}>طباعة قائمة الرواتب PDF</Button></Card>
+        </div>
+        <Card className="stack" style={{ marginTop: 18 }}>
+          <div className="row-between">
+            <h2 className="h3">السنة المالية</h2>
+            {years.some((y) => y.status === 'open') ? (
+              <Button type="button" variant="secondary" disabled={closing} onClick={closeYear}>{closing ? 'جارٍ الإغلاق...' : 'إغلاق السنة وفتح سنة جديدة'}</Button>
+            ) : null}
+          </div>
+          {years.length === 0 ? <EmptyState title="لا توجد سنوات مالية" body="تُنشأ السنة المالية تلقائياً مع إنشاء السنتر." /> : (
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>السنة</th><th>تبدأ</th><th>تنتهي</th><th>الحالة</th><th>رصيد افتتاحي</th><th>إيرادات</th><th>مصروفات</th><th>رصيد الختام</th><th>مستحقات معلقة</th></tr></thead>
+                <tbody>
+                  {years.map((y) => (
+                    <tr key={y.id}>
+                      <td><strong>{y.year_label}</strong></td>
+                      <td>{formatDate(y.starts_on)}</td>
+                      <td>{y.ends_on ? formatDate(y.ends_on) : '—'}</td>
+                      <td><Badge tone={y.status === 'open' ? 'success' : 'default'}>{y.status === 'open' ? 'مفتوحة' : 'مغلقة'}</Badge></td>
+                      <td>{formatMoney(y.opening_balance)}</td>
+                      <td>{y.closing_income === null ? '—' : formatMoney(y.closing_income)}</td>
+                      <td>{y.closing_expense === null ? '—' : formatMoney(y.closing_expense)}</td>
+                      <td><strong>{y.closing_balance === null ? '—' : formatMoney(y.closing_balance)}</strong></td>
+                      <td>{y.closing_pending_dues === null ? '—' : formatMoney(y.closing_pending_dues)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      </>
+    ) : null}
+
     <Modal
       open={expenseOpen}
       title="تسجيل مصروف"
