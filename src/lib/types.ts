@@ -242,6 +242,9 @@ export interface ExamQuestion {
 /** قيمة إجابة سؤال: فهرس / مصفوفة فهارس / نص / null لليدوي بلا نموذج */
 export type ExamAnswer = number | number[] | string | null;
 
+/** طريقة إظهار النتيجة للطالب */
+export type ExamResultMode = 'after_each' | 'end' | 'never';
+
 export interface AppExam {
   id: string;
   center_id: string;
@@ -253,6 +256,8 @@ export interface AppExam {
   answers: ExamAnswer[];
   total_score: number;
   is_published: boolean;
+  attempts_allowed: number;
+  show_result: ExamResultMode;
   created_at: string;
 }
 
@@ -265,6 +270,9 @@ export interface PublishedExam {
   total_score: number;
   questions: ExamQuestion[];
   attempted: boolean;
+  attempts_allowed: number;
+  attempts_used: number;
+  show_result: ExamResultMode;
   created_at: string;
 }
 

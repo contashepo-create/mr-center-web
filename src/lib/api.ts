@@ -201,18 +201,24 @@ export interface StaffInviteRow {
   role: 'teacher' | 'secretary'; status: 'pending' | 'accepted' | 'revoked'; created_at: string;
 }
 
-/** توليد كود دعوة (6 خانات بلا حروف ملتبسة) */
+/** توليد كود دعوة رقمي من 10 خانات على الأقل (واضح وسهل النسخ والإملاء) */
 export function generateInviteCode(): string {
-  const ABC = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
-  let out = '';
-  const rnd = new Uint32Array(6);
-  crypto.getRandomValues(rnd);
-  for (let i = 0; i < 6; i++) out += ABC[rnd[i] % ABC.length];
-  return out;
+  const digits: number[] = [];
+  try {
+    const rnd = new Uint32Array(10);
+    crypto.getRandomValues(rnd);
+    for (let i = 0; i < 10; i++) digits.push(rnd[i] % 10);
+  } catch {
+    // بيئة بلا Web Crypto (نادر على الويب) — تراجع آمن بلا تعطيل
+    for (let i = 0; i < 10; i++) digits.push(Math.floor(Math.random() * 10));
+  }
+  if (digits[0] === 0) digits[0] = 1 + (Math.floor(Math.random() * 9));
+  return digits.join('');
 }
 
 export async function createStaffInvite(input: {
   centerId: string; name: string; phone: string; role: 'teacher' | 'secretary';
+  perms?: TeacherPerms;
 }): Promise<string> {
   const sb = getSupabase();
   for (let attempt = 0; attempt < 5; attempt++) {
@@ -220,7 +226,7 @@ export async function createStaffInvite(input: {
     const { error } = await sb.from('staff_invites').insert({
       center_id: input.centerId, code, name: input.name.trim(),
       phone: input.phone.trim() || null, role: input.role,
-      perms: {}, group_ids: [],
+      perms: input.perms ?? {}, group_ids: [],
     });
     if (!error) return code;
     if (!String((error as { message?: string }).message ?? '').includes('duplicate key')) throw error;
@@ -291,13 +297,17 @@ export async function logActivity(centerId: string, action: string, details: str
     const uid = sess.session?.user.id ?? '';
     let actorName = '';
     if (uid) {
-      const { data: prof } = await sb.from('profiles').select('full_name').eq('id', uid).maybeSingle();
-      actorName = (prof as { full_name?: string } | null)?.full_name ?? '';
+      const { data: prof } = await sb.from('profiles').select('full_name, role').eq('id', uid).maybeSingle();
+      const p = prof as { full_name?: string; role?: string } | null;
+      // نشاط المطور (super_admin) لا يظهر في سجل نشاطات المستخدمين — يبقى السجل
+      // خاصاً بعمليات صاحب السنتر وفريقه داخل سنتره فقط.
+      if (p?.role === 'super_admin') return;
+      actorName = p?.full_name ?? '';
     }
-await sb.from('activity_log').insert({
-       id: uuid(), center_id: centerId, actor_id: uid,
-       actor_name: actorName, action, details
-     });
+    await sb.from('activity_log').insert({
+      id: uuid(), center_id: centerId, actor_id: uid,
+      actor_name: actorName, action, details
+    });
   } catch {
     // السجل إضافي — لا يكسر العملية الأساسية أبداً
   }
@@ -1016,6 +1026,8 @@ export async function upsertExam(centerId: string, exam: Partial<AppExam> & {
     answers,
     total_score: total,
     is_published: exam.is_published ?? false,
+    attempts_allowed: exam.attempts_allowed ?? 1,
+    show_result: exam.show_result ?? 'end',
   };
   if (exam.id) {
     const { error } = await getSupabase().from('app_exams').update(payload).eq('id', exam.id);
@@ -1045,14 +1057,23 @@ export async function fetchPublishedExams(): Promise<PublishedExam[]> {
   return (data ?? []) as PublishedExam[];
 }
 
-export async function submitExam(examId: string, answers: ExamAnswer[]): Promise<{
-  score: number; max_score: number; correct: number; total: number; status: string;
-}> {
+export interface ExamResult {
+  score: number;
+  max_score: number;
+  correct: number;
+  total: number;
+  status: string;
+  attempts_used?: number;
+  attempts_allowed?: number;
+  per_question?: { q: number; correct: boolean | null; earned: number; marks: number }[];
+}
+
+export async function submitExam(examId: string, answers: ExamAnswer[]): Promise<ExamResult> {
   const { data, error } = await getSupabase().rpc('submit_exam_attempt', {
     p_exam_id: examId, p_answers: answers,
   });
   if (error) throw error;
-  return data as { score: number; max_score: number; correct: number; total: number; status: string };
+  return data as ExamResult;
 }
 
 /** تصحيح يدوي لمحاولة فيها مقالي (المعلم يضع الدرجة النهائية) */

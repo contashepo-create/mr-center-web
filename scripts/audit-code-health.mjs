@@ -71,9 +71,16 @@ for (const file of sourceFiles) {
   }
 }
 
-const sql = read(join(root, 'supabase/android_multitenant_schema.sql'));
-const sqlTables = new Set([...sql.matchAll(/CREATE TABLE IF NOT EXISTS public\.([a-zA-Z0-9_]+)/g)].map((m) => m[1]));
-const sqlFunctions = new Set([...sql.matchAll(/CREATE OR REPLACE FUNCTION public\.([a-zA-Z0-9_]+)/g)].map((m) => m[1]));
+// نجمع الجداول والدوال من كل ملفات المخطط والترحيلات (وليس المخطط الأساسي فقط)
+// لأن الكثير من الدوال تُعرَّف في ترحيلات idempotent مثل 20260912_security.sql.
+const sqlFiles = readdirSync(join(root, 'supabase')).filter((f) => f.endsWith('.sql'));
+const sqlTables = new Set();
+const sqlFunctions = new Set();
+for (const f of sqlFiles) {
+  const sql = read(join(root, 'supabase', f));
+  for (const m of sql.matchAll(/CREATE TABLE IF NOT EXISTS public\.([a-zA-Z0-9_]+)/g)) sqlTables.add(m[1]);
+  for (const m of sql.matchAll(/CREATE (?:OR REPLACE )?FUNCTION public\.([a-zA-Z0-9_]+)/g)) sqlFunctions.add(m[1]);
+}
 for (const file of sourceFiles.filter((p) => /^(app|src)\//.test(rel(p)))) {
   const text = read(file);
   for (const m of text.matchAll(/\.from\(['"`]([^'"`]+)['"`]\)/g)) {

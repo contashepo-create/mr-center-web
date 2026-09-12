@@ -1,6 +1,11 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 
-const sql = readFileSync('supabase/android_multitenant_schema.sql', 'utf8');
+// نجمع كل ملفات SQL (المخطط الأساسي + الترحيلات) لأن دالة record_payment
+// وبوابة المحاسبة تُعرَّف في ترحيلات idempotent منفصلة.
+const sql = readdirSync('supabase')
+  .filter((f) => f.endsWith('.sql'))
+  .map((f) => readFileSync(`supabase/${f}`, 'utf8'))
+  .join('\n');
 const api = readFileSync('src/lib/api.ts', 'utf8');
 const page = readFileSync('app/admin/accounting/page.tsx', 'utf8');
 const custody = readFileSync('app/admin/custody/page.tsx', 'utf8');

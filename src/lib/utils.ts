@@ -377,6 +377,10 @@ export function arabicError(err: unknown): string {
   if (msg.includes('staff_not_allowed')) return 'الحساب المنفرد بلا فريق تابع — رقِّ لسنتر متكامل أولاً';
   if (msg.includes('invalid_role')) return 'الدور المطلوب غير صالح';
   if (msg.includes('already_attempted')) return 'أديت هذا الامتحان من قبل — لا يمكن تكرار المحاولة';
+  if (msg.includes('attempts_exhausted')) return 'استنفدت عدد المحاولات المسموح لك في هذا الاختبار';
+  if (msg.includes('complaint_rate_limited')) return 'تم استلام عدد كافٍ من الشكاوي في الوقت الحالي — حاول مجدداً بعد ساعة';
+  if (msg.includes('invalid_phone')) return 'رقم الهاتف غير صحيح — أدخل رقم هاتف صحيح للتتبع';
+  if (msg.includes('empty_complaint')) return 'اكتب نص الشكوى أولاً';
   if (msg.includes('already_answered')) return 'أجبت على هذا الاستبيان من قبل';
   if (msg.includes('exam_not_found')) return 'الامتحان غير متاح حالياً';
   if (msg.includes('login_rate_limited')) return 'محاولات دخول كثيرة — انتظر قليلاً ثم أعد المحاولة';

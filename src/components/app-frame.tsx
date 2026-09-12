@@ -18,6 +18,7 @@ interface NavItem {
   perm?: TeacherPermKey | null;
   ownerOnly?: boolean;
   feature?: 'accounting';
+  locked?: boolean;
 }
 
 const adminNav: NavItem[] = [
@@ -73,13 +74,19 @@ const devNav: NavItem[] = [
 ];
 
 function visibleAdminNav(profile: Profile | null, features: MyFeatures | null): NavItem[] {
-  return adminNav.filter((item) => {
-    if (!profile) return false;
-    if (item.feature === 'accounting' && !features?.accounting) return false;
-    if (item.ownerOnly) return isOwner(profile);
-    if (isStaff(profile) && item.perm) return can(profile, item.perm);
-    return true;
-  });
+  return adminNav
+    .map((item): NavItem | null => {
+      if (!profile) return null;
+      // قسم المحاسبة: يظهر لصاحب السنتر دائماً — مقفلاً برسالة عدم الاشتراك إن لم تكن الخدمة مفعلة.
+      if (item.feature === 'accounting') {
+        if (!isOwner(profile)) return null;
+        return { ...item, locked: !features?.accounting };
+      }
+      if (item.ownerOnly && !isOwner(profile)) return null;
+      if (isStaff(profile) && item.perm && !can(profile, item.perm)) return null;
+      return item;
+    })
+    .filter((item): item is NavItem => item !== null);
 }
 
 export function AppFrame({ area, children }: { area: 'admin' | 'student' | 'developer'; children: React.ReactNode }) {
@@ -125,6 +132,15 @@ export function AppFrame({ area, children }: { area: 'admin' | 'student' | 'deve
               {typeof subscription.days_left === 'number' ? <span className="tiny muted">{subscription.days_left} يوم متبقي</span> : null}
             </div>
           ) : null}
+          {area === 'admin' && isOwner(profile)
+            && subscription?.status === 'active'
+            && typeof subscription.days_left === 'number'
+            && subscription.days_left <= 7
+            && subscription.days_left >= 0 ? (
+            <div className="notice warn" style={{ marginTop: 10, fontSize: '.82rem', padding: '9px 12px' }}>
+              ⏳ باقتك على وشك الانتهاء (متبقٍ {subscription.days_left} يوم) — يمكنك طلب التجديد أو الترقية من صفحة الاشتراك.
+            </div>
+          ) : null}
         </div>
 
         <nav className="nav-section" aria-label="التنقل الرئيسي">
@@ -135,6 +151,7 @@ export function AppFrame({ area, children }: { area: 'admin' | 'student' | 'deve
               <Link key={item.href} href={item.href} className={`nav-link ${active ? 'active' : ''}`}>
                 <span>{item.icon}</span>
                 <span>{item.label}</span>
+                {item.locked ? <span title="خدمة غير مفعلة" style={{ marginInlineStart: 'auto' }}>🔒</span> : null}
               </Link>
             );
           })}

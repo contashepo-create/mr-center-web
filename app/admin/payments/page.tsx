@@ -2,6 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader, Select, formatStatus } from '@/components/ui';
+import { Modal } from '@/components/modal';
+import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
 import { fetchDues, fetchGroups, fetchPaymentsForMonth, fetchStudents, generateDuesForGroup, recordPayment } from '@/lib/api';
 import type { Due, Group, Payment, Student } from '@/lib/types';
@@ -11,6 +13,7 @@ import { arabicMonth, formatDate, formatMoney } from '@/lib/utils';
 
 export default function PaymentsPage() {
   const { profile } = useSession();
+  const toast = useToast();
   const centerId = profile?.center_id;
   const now = new Date();
   const [month, setMonth] = useState(String(now.getMonth() + 1));
@@ -21,6 +24,8 @@ export default function PaymentsPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [selectedGroup, setSelectedGroup] = useState('');
   const [pay, setPay] = useState({ dueId: '', amount: '', notes: '' });
+  const [payOpen, setPayOpen] = useState(false);
+  const [payDirty, setPayDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -69,16 +74,25 @@ export default function PaymentsPage() {
     finally { setBusy(false); }
   };
 
+  const openCollect = (due: Due) => {
+    setPay({ dueId: due.id, amount: String(due.amount), notes: '' });
+    setPayDirty(false);
+    setError(null);
+    setPayOpen(true);
+  };
+
   const collect = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!centerId || !pay.dueId) return;
     const due = dues.find((d) => d.id === pay.dueId);
     if (!due) return;
-    setBusy(true); setError(null); setMessage(null);
+    setBusy(true); setError(null);
     try {
       await recordPayment({ centerId, studentId: due.student_id, dueId: due.id, amount: Number(pay.amount) || Number(due.amount), month: Number(month), year: Number(year), notes: pay.notes });
       setPay({ dueId: '', amount: '', notes: '' });
-      setMessage('تم تسجيل الدفعة وتحديث حالة المستحق.');
+      setPayDirty(false);
+      setPayOpen(false);
+      toast.success('تم تسجيل الدفعة', 'حُدثت حالة المستحق بنجاح.');
       await load();
     } catch (err) { setError(err); }
     finally { setBusy(false); }
@@ -115,30 +129,43 @@ export default function PaymentsPage() {
         </Card>
 
         <Card className="stack">
-          <h2 className="h3">تحصيل مستحق</h2>
-          <form className="stack" onSubmit={collect}>
-            <Select label="المستحق" value={pay.dueId} onChange={(e) => {
-              const due = dues.find((d) => d.id === e.target.value);
-              setPay({ ...pay, dueId: e.target.value, amount: due ? String(due.amount) : '' });
-            }}>
-              <option value="">اختر مستحقاً</option>
-              {pendingDues.map((d) => <option key={d.id} value={d.id}>{studentsMap.get(d.student_id)?.name ?? d.student_id} — {formatMoney(d.amount)}</option>)}
-            </Select>
-            <Input label="المبلغ المدفوع" type="number" value={pay.amount} onChange={(e) => setPay({ ...pay, amount: e.target.value })} />
-            <Input label="ملاحظات" value={pay.notes} onChange={(e) => setPay({ ...pay, notes: e.target.value })} />
-            <Button disabled={busy || !pay.dueId} type="submit">تسجيل الدفعة</Button>
-          </form>
+          <h2 className="h3">تحصيل دفعة</h2>
+          <Notice>اضغط زر «تحصيل» بجوار أي مستحق في القائمة بالأسفل لتسجيل دفعة في نافذة منبثقة.</Notice>
+          <div className="grid grid-2">
+            <Card className="compact soft kpi"><span className="muted">مستحقات معلقة</span><div className="kpi-value">{pendingDues.length}</div></Card>
+            <Card className="compact soft kpi"><span className="muted">محصل هذا الشهر</span><div className="kpi-value" style={{ fontSize: '1.3rem' }}>{formatMoney(paidTotal)}</div></Card>
+          </div>
         </Card>
       </div>
 
       <Card className="stack" style={{ marginTop: 18 }}>
         <div className="row-between"><h2 className="h3">المستحقات</h2><Badge tone="info">{visibleDues.length}</Badge></div>
         {visibleDues.length === 0 ? <EmptyState title="لا توجد مستحقات" body={profile?.role === 'teacher' ? 'لا توجد مستحقات داخل مجموعاتك المسندة لهذا الشهر.' : 'ولّد مستحقات مجموعة لهذا الشهر أولاً.'} /> : (
-          <div className="table-wrap"><table><thead><tr><th>الطالب</th><th>المجموعة</th><th>المبلغ</th><th>الحالة</th><th>تاريخ الإنشاء</th></tr></thead><tbody>
-            {visibleDues.map((d) => { const st = formatStatus(d.status); return <tr key={d.id}><td>{studentsMap.get(d.student_id)?.name ?? '—'}</td><td>{d.group_id ? groupsMap.get(d.group_id)?.name ?? '—' : '—'}</td><td>{formatMoney(d.amount)}</td><td><Badge tone={st.tone}>{st.text}</Badge></td><td>{formatDate(d.created_at)}</td></tr>; })}
+          <div className="table-wrap"><table><thead><tr><th>الطالب</th><th>المجموعة</th><th>المبلغ</th><th>الحالة</th><th>تاريخ الإنشاء</th><th>إجراء</th></tr></thead><tbody>
+            {visibleDues.map((d) => { const st = formatStatus(d.status); return <tr key={d.id}><td>{studentsMap.get(d.student_id)?.name ?? '—'}</td><td>{d.group_id ? groupsMap.get(d.group_id)?.name ?? '—' : '—'}</td><td>{formatMoney(d.amount)}</td><td><Badge tone={st.tone}>{st.text}</Badge></td><td>{formatDate(d.created_at)}</td><td>{d.status !== 'paid' ? <Button type="button" variant="secondary" onClick={() => openCollect(d)}>تحصيل</Button> : '—'}</td></tr>; })}
           </tbody></table></div>
         )}
       </Card>
+
+      <Modal
+        open={payOpen}
+        title="تسجيل دفعة"
+        subtitle={studentsMap.get(dues.find((d) => d.id === pay.dueId)?.student_id ?? '')?.name ?? 'تحصيل مستحق'}
+        dirty={payDirty}
+        onClose={() => setPayOpen(false)}
+        onSave={() => void collect({ preventDefault: () => {} } as React.FormEvent)}
+        saveLabel={busy ? 'جاري الحفظ...' : 'تسجيل الدفعة'}
+        footer={<Button disabled={busy || !pay.dueId} type="submit" form="collect-form">{busy ? 'جاري الحفظ...' : 'تسجيل الدفعة'}</Button>}
+      >
+        <form id="collect-form" className="stack" onSubmit={collect}>
+          <div className="grid grid-2">
+            <Input label="المبلغ المدفوع" type="number" value={pay.amount} onChange={(e) => { setPay({ ...pay, amount: e.target.value }); setPayDirty(true); }} />
+            <Input label="ملاحظات" value={pay.notes} onChange={(e) => { setPay({ ...pay, notes: e.target.value }); setPayDirty(true); }} />
+          </div>
+          <Notice>سجّل المبلغ المدفوع لهذا المستحق — لا يمكن تجاوز المتبقي من قيمة المستحق.</Notice>
+          <ErrorNotice error={error} />
+        </form>
+      </Modal>
     </>
   );
 }

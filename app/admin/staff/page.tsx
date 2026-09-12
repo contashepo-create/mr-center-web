@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader } from '@/components/ui';
+import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
 import { assignTeacherGroups, createStaffInvite, deleteTeacher, fetchGroups, fetchStaff, fetchStaffInvites, fetchTeacherGroups, revokeStaffInvite, setTeacherActive, setTeacherPerms } from '@/lib/api';
 import { isOwner, roleLabel, TEACHER_PERMS } from '@/lib/rbac';
@@ -9,13 +10,13 @@ import type { Group, Profile, StaffInviteRow, TeacherPerms } from '@/lib/types';
 
 export default function StaffPage() {
   const { profile } = useSession();
+  const toast = useToast();
   const centerId = profile?.center_id;
   const [staff, setStaff] = useState<Profile[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [selected, setSelected] = useState<Profile | null>(null);
   const [selectedGroups, setSelectedGroups] = useState<string[]>([]);
   const [error, setError] = useState<unknown>(null);
-  const [message, setMessage] = useState<string | null>(null);
   const groupName = useMemo(() => new Map(groups.map((g) => [g.id, g.name])), [groups]);
 
   const load = async () => {
@@ -39,30 +40,31 @@ export default function StaffPage() {
   const togglePerm = async (p: Profile, key: keyof TeacherPerms) => {
     const next = { ...(p.perms ?? {}), [key]: !(p.perms ?? {})[key] } as TeacherPerms;
     setError(null);
-    try { await setTeacherPerms(p.id, next); await load(); setMessage('تم تحديث الصلاحيات.'); }
+    try { await setTeacherPerms(p.id, next); await load(); toast.success('تم تحديث الصلاحيات', `صلاحيات «${p.full_name}» حُدثت بنجاح.`); }
     catch (err) { setError(err); }
   };
 
   const toggleActive = async (p: Profile) => {
     setError(null);
-    try { await setTeacherActive(p.id, !p.is_active); await load(); }
+    try { await setTeacherActive(p.id, !p.is_active); await load(); toast.success(p.is_active ? 'تم إيقاف العضو' : 'تم تفعيل العضو', `«${p.full_name}» ${p.is_active ? 'أصبح غير نشط' : 'أصبح نشطاً'}.`); }
     catch (err) { setError(err); }
   };
 
   const saveGroups = async () => {
     if (!centerId || !selected) return;
     setError(null);
-    try { await assignTeacherGroups(centerId, selected.id, selectedGroups); setMessage('تم حفظ مجموعات الفريق.'); }
+    try { await assignTeacherGroups(centerId, selected.id, selectedGroups); toast.success('تم حفظ المجموعات', `حُفظت مجموعات «${selected.full_name}» بنجاح.`); }
     catch (err) { setError(err); }
   };
 
-  const remove = async (id: string) => { if (!confirm('حذف عضو الفريق؟')) return; try { await deleteTeacher(id); await load(); } catch (err) { setError(err); } };
+  const remove = async (id: string) => { if (!confirm('حذف عضو الفريق؟')) return; try { await deleteTeacher(id); await load(); toast.success('تم حذف العضو'); } catch (err) { setError(err); } };
 
   // --- دعوة موظف جديد (سكرتير/مدرس فقط) ---
   const [invites, setInvites] = useState<StaffInviteRow[]>([]);
   const [invName, setInvName] = useState('');
   const [invPhone, setInvPhone] = useState('');
   const [invRole, setInvRole] = useState<'teacher' | 'secretary'>('secretary');
+  const [invPerms, setInvPerms] = useState<TeacherPerms>({});
   const [invCode, setInvCode] = useState<string | null>(null);
   const [invBusy, setInvBusy] = useState(false);
 
@@ -74,24 +76,24 @@ export default function StaffPage() {
 
   const createInvite = async () => {
     if (!centerId || !invName.trim()) { setError(new Error('اكتب اسم الموظف')); return; }
-    setInvBusy(true); setError(null);
+    setInvBusy(true); setError(null); setInvCode(null);
     try {
-      const code = await createStaffInvite({ centerId, name: invName, phone: invPhone, role: invRole });
+      const code = await createStaffInvite({ centerId, name: invName, phone: invPhone, role: invRole, perms: invPerms });
       setInvCode(code); await loadInvites();
+      toast.success('تم توليد كود الدعوة', `كود «${invName}» جاهز — أرسله للموظف للتسجيل.`);
     } catch (err) { setError(err); }
     finally { setInvBusy(false); }
   };
-  const copyInvite = (code: string) => { void navigator.clipboard?.writeText(code); setMessage(`تم نسخ كود الدعوة: ${code}`); };
+  const copyInvite = (code: string) => { void navigator.clipboard?.writeText(code); toast.success('تم نسخ الكود', code); };
   const revokeInvite = async (inv: StaffInviteRow) => {
     if (!confirm(`إلغاء كود دعوة «${inv.name}»؟`)) return;
-    try { await revokeStaffInvite(inv.id); await loadInvites(); } catch (err) { setError(err); }
+    try { await revokeStaffInvite(inv.id); await loadInvites(); toast.success('تم سحب الدعوة', `أُلغيت دعوة «${inv.name}».`); } catch (err) { setError(err); }
   };
 
   return (
     <>
       <PageHeader title="فريق العمل" subtitle="تفعيل حسابات الفريق وتحديد صلاحياتهم ومجموعاتهم." />
       <ErrorNotice error={error} />
-      {message ? <Notice tone="success">{message}</Notice> : null}
       <div className="grid grid-2">
         <Card className="stack">
           <div className="row-between"><h2 className="h3">الأعضاء</h2><Badge tone="info">{staff.length}</Badge></div>
@@ -127,7 +129,27 @@ export default function StaffPage() {
             <option value="secretary">سكرتير</option>
             <option value="teacher">مدرس</option>
           </select>
-          {invCode ? <Notice tone="success">كود الدعوة: <b style={{ direction: 'ltr' }}>{invCode}</b> — أرسله للموظف ليتسجل به من «انضمام فريق عمل».</Notice> : null}
+          <div className="stack">
+            <span className="label">صلاحيات الموظف (تُطبق فور تسجيله)</span>
+            <div className="row">
+              {TEACHER_PERMS.map((perm) => {
+                const on = !!invPerms[perm.key];
+                return (
+                  <button
+                    key={perm.key}
+                    type="button"
+                    title={perm.hint}
+                    className={`tab ${on ? 'active' : ''}`}
+                    onClick={() => setInvPerms((old) => ({ ...old, [perm.key]: !on }))}
+                  >
+                    {perm.label}
+                  </button>
+                );
+              })}
+            </div>
+            <span className="tiny muted">حدد ما يستطيع هذا الموظف فعله داخل سنترك — يمكنك تعديلها لاحقاً من صفحة الفريق.</span>
+          </div>
+          {invCode ? <Notice tone="success">كود الدعوة: <b style={{ direction: 'ltr', fontSize: '1.15rem' }}>{invCode}</b> — أرسله للموظف ليتسجل به من «انضمام فريق عمل».</Notice> : null}
           <div className="row">
             <Button disabled={invBusy} type="button" onClick={() => void createInvite()}>{invBusy ? 'جاري التوليد...' : 'توليد كود دعوة'}</Button>
             {invCode ? <Button variant="secondary" type="button" onClick={() => copyInvite(invCode)}>نسخ الكود</Button> : null}

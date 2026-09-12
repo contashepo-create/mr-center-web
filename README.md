@@ -179,6 +179,7 @@ supabase/android_multitenant_schema.sql          # المخطط الأساسي �
 supabase/20260912_fiscal_accounting.sql          # السنة المالية + المحاسبة + الاشتراكات + الزوار
 supabase/20260912_security.sql                   # السباقات + جلسة واحدة + منع الروبوتات
 supabase/20260912_parity_invites.sql             # (تكافؤ Android) بوابة المحاسبة الخادمية + دعوات الفريق + المدير الوحيد
+supabase/20260912_exams_complaints.sql           # محاولات الاختبارات المتعددة + طرق عرض النتيجة + قسم الشكاوي العام
 ```
 
 ---
