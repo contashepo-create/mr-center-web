@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
 import { useSession } from '@/context/session';
 import { planLabel } from '@/lib/billing';
 import { setDevUnlocked } from '@/lib/devMode';
@@ -129,6 +130,15 @@ export function AppFrame({ area, children }: { area: 'admin' | 'student' | 'deve
   const pathname = usePathname();
   const router = useRouter();
   const { profile, subscription, features, signOut } = useSession();
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // إغلاق القائمة تلقائياً عند تغيير المسار أو تكبير الشاشة
+  useEffect(() => { setMenuOpen(false); }, [pathname]);
+  useEffect(() => {
+    const onResize = () => { if (window.innerWidth > 900) setMenuOpen(false); };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   const nav = area === 'admin' ? visibleAdminNav(profile, features) : area === 'student' ? studentNav : devNav;
   const displayRole = area === 'admin' && profile?.role === 'super_admin' ? 'الإدارة' : roleLabel(profile?.role ?? '');
@@ -143,10 +153,20 @@ export function AppFrame({ area, children }: { area: 'admin' | 'student' | 'deve
     router.replace('/');
   };
 
+  const closeMenu = () => setMenuOpen(false);
+
   return (
     <div className="app-shell">
-      <aside className="sidebar no-print">
-        <Link href="/" className="brand">
+      <div className="mobile-bar no-print">
+        <div className="brand" style={{ marginBottom: 0, gap: 10 }}>
+          <div className="logo" style={{ width: 38, height: 38, fontSize: '.8rem' }}>MR</div>
+          <strong>Mr Center</strong>
+        </div>
+        <button type="button" className="hamburger" aria-label="القائمة" onClick={() => setMenuOpen((v) => !v)}>{menuOpen ? '✕' : '☰'}</button>
+      </div>
+      {menuOpen ? <div className="sidebar-backdrop show" onClick={closeMenu} /> : null}
+      <aside className={`sidebar no-print ${menuOpen ? 'open' : ''}`}>
+        <Link href="/" className="brand" onClick={closeMenu}>
           <div className="logo">MR</div>
           <div>
             <strong>Mr Center</strong>
@@ -187,7 +207,7 @@ export function AppFrame({ area, children }: { area: 'admin' | 'student' | 'deve
                   {group.items.map((item) => {
                     const active = pathname === item.href || (item.href !== `/${area}` && pathname.startsWith(item.href));
                     return (
-                      <Link key={item.href} href={item.href} className={`nav-link ${active ? 'active' : ''}`}>
+                      <Link key={item.href} href={item.href} className={`nav-link ${active ? 'active' : ''}`} onClick={closeMenu}>
                         <span>{item.icon}</span>
                         <span>{item.label}</span>
                         {item.locked ? <span title="خدمة غير مفعلة" style={{ marginInlineStart: 'auto' }}>🔒</span> : null}
@@ -199,7 +219,7 @@ export function AppFrame({ area, children }: { area: 'admin' | 'student' | 'deve
             : (nav as NavItem[]).map((item) => {
                 const active = pathname === item.href || (item.href !== `/${area}` && pathname.startsWith(item.href));
                 return (
-                  <Link key={item.href} href={item.href} className={`nav-link ${active ? 'active' : ''}`}>
+                  <Link key={item.href} href={item.href} className={`nav-link ${active ? 'active' : ''}`} onClick={closeMenu}>
                     <span>{item.icon}</span>
                     <span>{item.label}</span>
                     {item.locked ? <span title="خدمة غير مفعلة" style={{ marginInlineStart: 'auto' }}>🔒</span> : null}

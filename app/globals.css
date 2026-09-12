@@ -216,6 +216,39 @@ tbody tr:hover { background: var(--surface-2); }
 .topbar { margin-bottom: 22px; }
 .mobile-menu { display: none; }
 
+/* شريط علوي للموبايل + قائمة جانبية منزلقة */
+.mobile-bar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-3);
+  position: sticky;
+  top: 0;
+  z-index: 55;
+}
+.hamburger {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 10px;
+  min-height: 42px;
+  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+}
+.sidebar-backdrop {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  z-index: 58;
+}
+
 .hero { padding: 34px 0 56px; }
 .hero-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 24px; align-items: center; }
 .hero-panel { border-radius: 18px; padding: 28px; min-height: 430px; }
@@ -367,14 +400,47 @@ tbody tr:hover { background: var(--surface-2); }
   .hero-grid { grid-template-columns: 1fr; }
 }
 
-@media (max-width: 820px) {
+@media (max-width: 1024px) {
+  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-3 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 900px) {
   .app-shell { grid-template-columns: 1fr; }
-  .sidebar { position: static; height: auto; border-inline-end: 0; border-bottom: 1px solid var(--border); }
-  .nav-section { display: flex; gap: 8px; overflow: auto; padding-bottom: 4px; }
-  .nav-title { display: none; }
-  .nav-link { white-space: nowrap; }
-  .main { padding: 18px; }
+  .main { padding: 16px 14px 40px; }
+  .mobile-bar { display: flex; }
+  .sidebar {
+    position: fixed;
+    inset-block: 0;
+    inset-inline-start: 0;
+    width: 300px;
+    height: 100dvh;
+    max-width: 86vw;
+    transform: translateX(100%);
+    transition: transform .25s ease;
+    z-index: 60;
+    border-inline-end: 1px solid var(--border);
+    box-shadow: var(--shadow);
+  }
+  .sidebar.open { transform: translateX(0); }
+  .sidebar-backdrop.show { display: block; }
   .grid-2, .grid-3, .grid-4 { grid-template-columns: 1fr; }
+  .hero-grid { grid-template-columns: 1fr; }
+  .hero-panel { min-height: 0; }
+  .exam-builder-layout { grid-template-columns: 1fr; }
+  .exam-preview-col { position: static; top: auto; }
+}
+
+@media (max-width: 560px) {
+  .card { padding: 16px; }
+  .row-between > .btn, .row-between > .tabs { width: 100%; }
+  .kpi-value { font-size: 1.55rem; }
+  .btn { min-height: 46px; }
+  .exam-paper-inner { padding: 14px 12px; }
+  .exam-paper-choices { grid-template-columns: 1fr; }
+  .exam-paper-meta { flex-direction: column; gap: 8px; }
+  table { font-size: .82rem; }
+  th, td { padding: 10px; }
 }
 
 @media print {
@@ -393,7 +459,7 @@ tbody tr:hover { background: var(--surface-2); }
 .review-correct { background: color-mix(in srgb, var(--success) 10%, var(--surface-2)); }
 .review-wrong { background: color-mix(in srgb, var(--danger) 10%, var(--surface-2)); }
 
-/* ===== ورقة الاختبار (طباعة + معاينة) ===== */
+/* ===== ورقة الاختبار (طباعة + معاينة) — الورقة الامتحانية المصرية ===== */
 .exam-paper {
   position: relative;
   overflow: hidden;
@@ -403,32 +469,114 @@ tbody tr:hover { background: var(--surface-2); }
   border: 1px solid #ddd;
   box-shadow: 0 2px 14px rgba(0,0,0,.08);
 }
-.exam-paper-inner { position: relative; z-index: 1; padding: 30px 34px; }
+.exam-paper-inner { position: relative; z-index: 1; padding: 28px 30px; }
 .exam-paper-center { text-align: center; font-size: .85rem; font-weight: 700; color: #555; margin-bottom: 4px; }
-.exam-paper-head { text-align: center; border-bottom: 2.5px solid #111; padding-bottom: 14px; margin-bottom: 14px; }
+.exam-paper-head { text-align: center; border-bottom: 2.5px solid #111; padding-bottom: 14px; margin-bottom: 12px; }
 .exam-paper-title { margin: 0; font-size: 1.5rem; font-weight: 800; }
 .exam-paper-sub { margin-top: 6px; color: #333; font-size: .95rem; }
 .exam-paper-meta { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; font-size: .9rem; color: #222; }
+.exam-blank { display: inline-block; min-width: 9rem; border-bottom: 1.5px dotted #333; vertical-align: baseline; }
+.exam-blank.small { min-width: 5rem; }
+.exam-blank.inline { min-width: 6rem; margin-inline-start: 4px; }
+
 .exam-paper-body { display: flex; flex-direction: column; gap: 14px; }
-.exam-paper-q { border-bottom: 1px solid #ddd; padding-bottom: 12px; }
+
+/* قسم سؤال (السؤال الأول: ...) */
+.exam-paper-section {
+  border: 1.5px solid #1e3a5f;
+  border-radius: 10px;
+  overflow: hidden;
+  break-inside: avoid;
+  background: #fff;
+}
+.exam-paper-sec-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 14px;
+  border-bottom: 1.5px solid #1e3a5f;
+  background: #f4f7fb;
+}
+.exam-paper-sec-title { margin: 0; font-size: 1.02rem; font-weight: 800; color: #0f172a; line-height: 1.6; }
+.exam-paper-sec-mark {
+  display: inline-grid; place-items: center;
+  min-width: 34px; height: 24px; margin-inline-end: 8px;
+  padding: 0 8px; border: 1px solid #1e3a5f; border-radius: 6px;
+  background: #fff; color: #1e3a5f; font-size: .78rem; font-weight: 800;
+  vertical-align: middle;
+}
+.exam-paper-sec-marks {
+  flex-shrink: 0; font-size: .82rem; font-weight: 800;
+  color: #1e3a5f; background: #fff; border: 1px solid #1e3a5f;
+  padding: 3px 10px; border-radius: 999px; white-space: nowrap;
+}
+.exam-paper-sec-items { padding: 12px 16px 14px; display: flex; flex-direction: column; gap: 10px; }
+.exam-paper-item { border-bottom: 1px dashed #cbd5e1; padding-bottom: 10px; }
+.exam-paper-item:last-child { border-bottom: 0; padding-bottom: 0; }
+
 .exam-paper-q-row { display: flex; gap: 16px; align-items: flex-start; }
 .exam-paper-q-text { flex: 1; min-width: 0; }
-.exam-paper-q-line { display: flex; gap: 6px; font-weight: 700; align-items: baseline; }
 .exam-paper-q-no { font-weight: 800; }
-.exam-paper-q-body { white-space: pre-wrap; }
-.exam-paper-q-marks { font-weight: 400; color: #555; font-size: .85rem; }
-.exam-paper-q-answers { margin-top: 8px; }
-.exam-paper-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px; }
-.exam-paper-choice { display: flex; gap: 6px; align-items: baseline; }
+.exam-paper-q-body { margin: 0; white-space: pre-wrap; font-weight: 500; line-height: 1.9; }
+
+.exam-paper-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 22px; margin-top: 4px; padding-inline-start: 14px; }
+.exam-paper-choice { display: flex; gap: 6px; align-items: baseline; font-size: .92rem; }
 .exam-paper-choice-mark { color: #333; }
-.exam-paper-dots { margin-top: 10px; border-bottom: 1.5px dotted #999; height: 34px; }
-.exam-paper-match { display: flex; flex-direction: column; gap: 8px; }
+.exam-paper-choice-key { font-weight: 700; color: #111; }
+
+.exam-paper-tf { display: flex; align-items: center; gap: 10px; margin-top: 6px; padding-inline-start: 14px; }
+.exam-paper-tf-box {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 3.4rem; height: 1.7rem; padding: 0 6px;
+  border: 1.5px solid #111; border-radius: 4px; font-weight: 700; letter-spacing: 2px;
+}
+.exam-paper-tf-hint { color: #555; font-size: .82rem; }
+
+.exam-paper-lines { margin-top: 4px; }
+.exam-paper-dots { margin-top: 9px; border-bottom: 1.5px dotted #999; height: 30px; }
+
+.exam-paper-match { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
 .exam-paper-match-row { display: flex; gap: 12px; align-items: center; }
-.exam-paper-match-l { flex: 1; }
-.exam-paper-match-r { flex: 1; }
+.exam-paper-match-l { flex: 1; font-weight: 600; }
+.exam-paper-match-r { flex: 1; font-weight: 600; }
 .exam-paper-match-blank { width: 60px; border-bottom: 1.5px dotted #999; }
-.exam-paper-footer { text-align: center; color: #666; font-size: .9rem; margin-top: 18px; }
+
+.exam-paper-footer { text-align: center; color: #666; font-size: .9rem; margin-top: 18px; font-weight: 700; }
 .q-image img { max-width: 100%; }
+
+/* ===== باني الاختبار: عمودان (باني + معاينة حية) ===== */
+.exam-builder-layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 18px; align-items: start; }
+.exam-preview-col { position: sticky; top: 16px; }
+.exam-preview-scroll { max-height: calc(100vh - 200px); overflow: auto; border: 1px solid var(--border); border-radius: 12px; padding: 6px; background: var(--surface-3); }
+.exam-type-palette { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.exam-type-btn {
+  display: flex; align-items: center; gap: 8px;
+  border: 1px solid var(--border); border-radius: 12px;
+  background: var(--surface-3); color: var(--text);
+  padding: 10px 12px; font-weight: 700; font-size: .86rem;
+  transition: border-color .15s ease, background .15s ease;
+}
+.exam-type-btn:hover { border-color: var(--primary); background: var(--primary-soft); }
+.exam-type-icon { font-size: 1.1rem; }
+
+/* أشرطة توزيع المصروفات */
+.expense-bars { display: flex; flex-direction: column; gap: 12px; }
+.expense-bar-row { display: grid; gap: 6px; }
+.expense-bar-track { height: 10px; border-radius: 999px; background: var(--border); overflow: hidden; }
+.expense-bar-fill { height: 100%; border-radius: 999px; background: var(--danger); transition: width .3s ease; }
+
+/* شبكة التنقل بين أسئلة الاختبار أثناء التأدية */
+.exam-nav { display: flex; flex-wrap: wrap; gap: 6px; }
+.exam-nav-btn {
+  min-width: 38px; height: 38px; padding: 0 8px;
+  border-radius: 10px; border: 1px solid var(--border);
+  background: var(--surface-3); color: var(--muted);
+  font-weight: 800; font-size: .85rem;
+  transition: all .12s ease;
+}
+.exam-nav-btn.done { border-color: color-mix(in srgb, var(--success) 45%, transparent); color: var(--success); background: color-mix(in srgb, var(--success) 10%, transparent); }
+.exam-nav-btn.on { border-color: var(--primary); color: var(--on-primary); background: var(--primary); }
 
 /* لوحة اختيار الأختام */
 .stamp-palette { display: flex; flex-wrap: wrap; gap: 8px; }
@@ -445,7 +593,8 @@ tbody tr:hover { background: var(--surface-2); }
 @media print {
   .exam-paper { border: none; box-shadow: none; border-radius: 0; }
   .exam-paper-inner { padding: 0; }
-  .exam-paper-q { break-inside: avoid; }
+  .exam-paper-section { break-inside: avoid; }
+  .exam-paper-item { break-inside: avoid; }
 }
 
 /* ===== لوحة الشرف الاحتفالية ===== */

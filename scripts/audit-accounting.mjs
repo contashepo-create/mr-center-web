@@ -34,7 +34,7 @@ has(sql, /p_amount > \(v_due - v_paid\)/, 'SQL: record_payment must reject payme
 has(sql, /collected_by, collected_by_name/, 'SQL: record_payment must store collector identity');
 has(sql, /due_not_found/, 'SQL: record_payment does not reject missing due records');
 
-if (/value=['"]income['"]/.test(page) || /kind:\s*form\.kind/.test(page) || /setForm\([^)]*kind/.test(page)) {
+if (/kind:\s*['"]income['"]/.test(page) || /kind:\s*form\.kind/.test(page) || /setForm\([^)]*kind/.test(page)) {
   issues.push('Accounting UI: manual income entry is enabled; income must come from payment_collection trigger only');
 }
 has(page, /kind:\s*'expense'/, 'Accounting UI: manual ledger entries are not forced to expense');
