@@ -38,6 +38,18 @@ function roleAllowed(expected: LoginRole, actual: Role | null): boolean {
   return actual === 'center_admin' || actual === 'super_admin';
 }
 
+/** رسالة خطأ دخول واضحة تشجع على إعادة المحاولة بدل رسالة تقنية مبهمة */
+function friendlyLoginError(err: unknown): unknown {
+  if (err instanceof Error && err.message) {
+    const m = err.message;
+    if (m.includes('login_rate_limited')) return new Error('محاولات دخول كثيرة مؤخراً. انتظر بضع دقائق ثم أعد المحاولة.');
+    if (/invalid login credentials/i.test(m)) return new Error('البريد الإلكتروني أو كلمة المرور غير صحيحة. راجع بياناتك وأعد المحاولة.');
+    if (/email not confirmed/i.test(m)) return new Error('بريدك غير مؤكد بعد — افتح رابط التأكيد المرسل إليك ثم أعد الدخول.');
+    if (/too many requests/i.test(m)) return new Error('طلبات كثيرة. انتظر لحظة ثم أعد المحاولة.');
+  }
+  return err;
+}
+
 function roleFromParam(param: string | null): LoginRole {
   if (param === 'student') return 'student';
   if (param === 'teacher' || param === 'staff') return 'staff';
@@ -138,7 +150,7 @@ function LoginForm() {
       router.replace(search.get('next') || targetForRole(actualRole));
     } catch (err) {
       try { await getSupabase().auth.signOut(); } catch { /* ignore */ }
-      setError(err);
+      setError(friendlyLoginError(err));
     } finally {
       setBusy(false);
     }

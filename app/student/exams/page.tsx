@@ -147,10 +147,34 @@ function ResultPanel({ result, mode, questions, onBack }: { result: ExamResult; 
       </div>
     </Card>;
   }
-  return <Card className="soft stack" style={{ textAlign: 'center' }}>
-    <div style={{ fontSize: 36 }}>🎉</div>
-    <h3 className="h3">تم التسليم — نتيجتك {result.score} من {result.max_score}</h3>
-    <p className="muted">{result.status === 'pending_review' ? 'هناك أسئلة بانتظار مراجعة المعلم.' : `أجبت صحيحاً على ${result.correct} من ${result.total} سؤال.`}</p>
-    <div className="row" style={{ justifyContent: 'center' }}><Button type="button" onClick={onBack}>العودة إلى الاختبارات</Button></div>
+  return <Card className="stack">
+    <div className="card compact soft stack" style={{ textAlign: 'center', padding: '22px 18px' }}>
+      <div style={{ fontSize: 36 }}>🎉</div>
+      <h3 className="h3">تم التسليم — نتيجتك {result.score} من {result.max_score}</h3>
+      <p className="muted">{result.status === 'pending_review' ? 'هناك أسئلة بانتظار مراجعة المعلم.' : `أجبت صحيحاً على ${result.correct} من ${result.total} سؤال.`}</p>
+    </div>
+    <ReviewList result={result} questions={questions} />
+    <div className="row" style={{ justifyContent: 'flex-start' }}><Button type="button" onClick={onBack}>العودة إلى الاختبارات</Button></div>
   </Card>;
+}
+
+/** مراجعة سؤال بسؤال (نفس مراجعة النسخة الأصلية بعد التسليم) */
+function ReviewList({ result, questions }: { result: ExamResult; questions: ExamQuestion[] }) {
+  if (!(result.per_question ?? []).length) return null;
+  return <div className="stack" style={{ gap: 8 }}>
+    <h3 className="h3">مراجعة الإجابات</h3>
+    {(result.per_question ?? []).map((r) => {
+      const q = questions[r.q];
+      if (!q) return null;
+      const manual = r.correct === null;
+      return <div key={r.q} className="row-between card compact soft">
+        <span style={{ flex: 1 }}><b>{r.q + 1}.</b> {q.q}</span>
+        {manual
+          ? <Badge tone="warn">بانتظار المراجعة</Badge>
+          : r.correct
+            ? <Badge tone="success">✓ صحيحة · {r.earned}/{r.marks}</Badge>
+            : <Badge tone="danger">✗ خاطئة · {r.earned}/{r.marks}</Badge>}
+      </div>;
+    })}
+  </div>;
 }
