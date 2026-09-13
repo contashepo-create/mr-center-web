@@ -1,0 +1,3 @@
+# A unified patch must preserve source whitespace so it stays byte-for-byte applicable.
+# Do not report whitespace that belongs to the patch payload as a repository diff error.
+*.patch -whitespace
