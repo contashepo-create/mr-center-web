@@ -1,10 +1,11 @@
 -- ============================================================================
--- Mr Center — عزل مسيرات الرواتب حسب الشهر
+-- Mr Center — مسيرات الرواتب حسب الشهر
 -- التاريخ: 2026-09-13
 -- شغّل بعد 20260913_accounting_operations.sql على قواعد البيانات القائمة.
 --
--- يضمن هذا التحديث أن السلفة والخصم المطبقان مع راتب يخصان الشهر نفسه فقط.
--- الأرصدة الأقدم لا تختلط بمسير شهر جديد، وتظل موثقة في كشف الحساب التاريخي.
+-- تاريخ الصرف يحدد شهر المسير والتقارير. الرصيد المتبقي المرحّل لا يُجمع
+-- مع حركات الشهر السابقة، لكنه قابل للتسوية الجزئية في مسير تالٍ. يضيف
+-- 20260913_settlement_traceability.sql الأثر التفصيلي لكل تخصيص.
 -- ============================================================================
 
 BEGIN;
@@ -24,8 +25,6 @@ DECLARE
   v_commission NUMERIC := COALESCE(p_commission, 0); v_advance_used NUMERIC := COALESCE(p_advance_applied, 0);
   v_deduction_used NUMERIC := COALESCE(p_deduction_applied, 0); v_total NUMERIC := 0; v_cash_paid NUMERIC := 0;
   v_deduction public.staff_deductions%ROWTYPE;
-  v_period_start DATE := date_trunc('month', COALESCE(p_date, CURRENT_DATE))::DATE;
-  v_period_end DATE := (date_trunc('month', COALESCE(p_date, CURRENT_DATE)) + INTERVAL '1 month')::DATE;
 BEGIN
   PERFORM public.assert_accounting_owner(p_center);
   v_employee_name := public.assert_accounting_employee(p_center, p_employee);
@@ -35,22 +34,18 @@ BEGIN
   END IF;
 
   PERFORM 1 FROM public.center_ledger
-   WHERE center_id = p_center AND employee_id = p_employee AND entry_type IN ('advance','salary')
-     AND occurred_on >= v_period_start AND occurred_on < v_period_end FOR UPDATE;
+   WHERE center_id = p_center AND employee_id = p_employee AND entry_type IN ('advance','salary') FOR UPDATE;
   SELECT COALESCE(SUM(CASE WHEN entry_type = 'advance' THEN amount ELSE -advance_applied END), 0)
     INTO v_advance_balance FROM public.center_ledger
-   WHERE center_id = p_center AND employee_id = p_employee AND entry_type IN ('advance','salary')
-     AND occurred_on >= v_period_start AND occurred_on < v_period_end;
+   WHERE center_id = p_center AND employee_id = p_employee AND entry_type IN ('advance','salary');
   IF v_advance_used > v_advance_balance THEN RAISE EXCEPTION 'advance_exceeds_balance'; END IF;
 
   PERFORM 1 FROM public.staff_deductions
-   WHERE center_id = p_center AND staff_id = p_employee AND id = ANY(COALESCE(p_deduction_ids, '{}'))
-     AND occurred_on >= v_period_start AND occurred_on < v_period_end FOR UPDATE;
+   WHERE center_id = p_center AND staff_id = p_employee AND id = ANY(COALESCE(p_deduction_ids, '{}')) FOR UPDATE;
   SELECT COALESCE(SUM(amount - applied_amount), 0) INTO v_selected_deductions
   FROM public.staff_deductions
   WHERE center_id = p_center AND staff_id = p_employee AND id = ANY(COALESCE(p_deduction_ids, '{}'))
-    AND status IN ('open','partial')
-    AND occurred_on >= v_period_start AND occurred_on < v_period_end;
+    AND status IN ('open','partial');
   IF v_deduction_used > v_selected_deductions THEN RAISE EXCEPTION 'deduction_exceeds_selected_balance'; END IF;
   IF v_advance_used + v_deduction_used > v_total THEN RAISE EXCEPTION 'payroll_deductions_exceed_total'; END IF;
   v_cash_paid := v_total - v_advance_used - v_deduction_used;
@@ -73,7 +68,6 @@ BEGIN
     SELECT * FROM public.staff_deductions
     WHERE center_id = p_center AND staff_id = p_employee AND id = ANY(COALESCE(p_deduction_ids, '{}'))
       AND status IN ('open','partial')
-      AND occurred_on >= v_period_start AND occurred_on < v_period_end
     ORDER BY occurred_on, created_at FOR UPDATE
   LOOP
     EXIT WHEN v_remaining <= 0;
@@ -91,7 +85,7 @@ $$;
 GRANT EXECUTE ON FUNCTION public.record_salary_payment(UUID, UUID, NUMERIC, NUMERIC, NUMERIC, NUMERIC, NUMERIC, UUID[], DATE, TEXT) TO authenticated;
 
 
--- تحفظ التطبيقات الأقدم هذا الاسم؛ يطبق عليها العزل الشهري نفسه.
+-- تحفظ التطبيقات الأقدم هذا الاسم؛ يبقى تاريخ الصرف هو شهر مسيرها.
 CREATE OR REPLACE FUNCTION public.record_payroll_settlement(
   p_center uuid, p_employee uuid, p_base_salary numeric,
   p_bonus numeric DEFAULT 0, p_commission numeric DEFAULT 0,
@@ -107,8 +101,6 @@ DECLARE
   v_advance_used numeric := coalesce(p_advance_applied, 0);
   v_deduction numeric := coalesce(p_deduction, 0);
   v_total numeric := 0; v_cash_paid numeric := 0;
-  v_period_start date := date_trunc('month', coalesce(p_date, current_date))::date;
-  v_period_end date := (date_trunc('month', coalesce(p_date, current_date)) + interval '1 month')::date;
 BEGIN
   PERFORM public.assert_accounting_owner(p_center);
   v_employee_name := public.assert_accounting_employee(p_center, p_employee);
@@ -120,14 +112,12 @@ BEGIN
   -- قفل سجل سلف/تسويات الموظف قبل الحساب، حتى لا تُسوّى السلفة نفسها مرتين من طلبين متزامنين.
   PERFORM 1 FROM public.center_ledger
    WHERE center_id = p_center AND employee_id = p_employee AND entry_type IN ('advance','salary')
-     AND occurred_on >= v_period_start AND occurred_on < v_period_end
    FOR UPDATE;
   SELECT coalesce(sum(CASE WHEN entry_type = 'advance' THEN amount ELSE -advance_applied END), 0)
     INTO v_advance_balance
   FROM public.center_ledger
   WHERE center_id = p_center AND employee_id = p_employee
-    AND entry_type IN ('advance','salary')
-    AND occurred_on >= v_period_start AND occurred_on < v_period_end;
+    AND entry_type IN ('advance','salary');
 
   IF v_advance_used > v_advance_balance THEN RAISE EXCEPTION 'advance_exceeds_balance'; END IF;
   IF v_advance_used + v_deduction > v_total THEN RAISE EXCEPTION 'payroll_deductions_exceed_total'; END IF;

@@ -7,7 +7,7 @@
 // - صورة السؤال: بجانب النص (ورقي) أو فوق/تحت (إلكتروني) مع تحكم بالحجم
 // ============================================================
 
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ALL_ORNAMENTS, ornamentGlyph } from '@/lib/exam-ornaments';
 import type { ExamOrnaments, ExamQuestion, OrnamentDensity, OrnamentStamp } from '@/lib/types';
 
@@ -83,7 +83,7 @@ export function ManualStamps({ stamps, opacity }: { stamps: OrnamentStamp[]; opa
   return (
     <>
       {stamps.map((st) => (
-        <OrnamentGlyph key={st.id} kind={st.kind} size={st.size} opacity={Math.max(0.08, opacity + 0.08)} style={{ top: `${st.y}%`, left: `${st.x}%` }} />
+        <OrnamentGlyph key={st.id} kind={st.kind} size={st.size} opacity={Math.max(0.04, Math.min(0.5, opacity))} style={{ top: `${st.y}%`, left: `${st.x}%` }} />
       ))}
     </>
   );
@@ -146,6 +146,7 @@ function stampId(): string {
 export function StampEditor({ ornaments, onChange, children }: { ornaments: ExamOrnaments; onChange: (o: ExamOrnaments) => void; children: React.ReactNode }) {
   const [activeKind, setActiveKind] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLDivElement>(null);
 
   const kinds = useMemo(() => (ornaments.kinds?.length ? ornaments.kinds : ALL_ORNAMENTS.map((o) => o.kind)), [ornaments.kinds]);
   const selected = ornaments.stamps?.find((s) => s.id === selectedId) ?? null;
@@ -161,13 +162,36 @@ export function StampEditor({ ornaments, onChange, children }: { ornaments: Exam
   };
 
   const randomFill = () => {
+    const canvas = canvasRef.current;
     const n = Math.min(12, Math.max(4, kinds.length));
-    const stamps: OrnamentStamp[] = Array.from({ length: n }, (_, i) => ({
-      id: stampId(),
-      kind: kinds[i % kinds.length],
-      x: 4 + Math.round(Math.random() * 92),
-      y: 4 + Math.round(Math.random() * 92),
-      size: 28 + Math.round(Math.random() * 20),
+    // نقرأ مناطق النص الحقيقية من المعاينة، ثم نختار نقاطاً من الفراغات بينها.
+    // هكذا التوزيع عشوائي بصرياً لكنه لا يغطي كلمات الأسئلة أو الاختيارات.
+    const rect = canvas?.getBoundingClientRect();
+    const blocked = canvas ? Array.from(canvas.querySelectorAll<HTMLElement>(
+      '.exam-paper-head,.exam-paper-meta,.exam-paper-sec-head,.exam-paper-q-body,.exam-paper-choice,.exam-paper-tf,.exam-paper-match,.exam-paper-footer,.q-image',
+    )).map((element) => element.getBoundingClientRect()) : [];
+    const candidates: Array<{ x: number; y: number; size: number }> = [];
+    if (rect && rect.width > 0 && rect.height > 0) {
+      for (let y = 7; y <= 93; y += 7) for (let x = 6; x <= 94; x += 8) {
+        const size = 28 + Math.round(Math.random() * 18);
+        const radius = Math.max(17, size * .48);
+        const pointX = rect.left + (x / 100) * rect.width;
+        const pointY = rect.top + (y / 100) * rect.height;
+        const hitsText = blocked.some((area) => pointX + radius > area.left && pointX - radius < area.right && pointY + radius > area.top && pointY - radius < area.bottom);
+        const hitsStamp = (ornaments.stamps ?? []).some((stamp) => Math.hypot(stamp.x - x, stamp.y - y) < 8);
+        if (!hitsText && !hitsStamp) candidates.push({ x, y, size });
+      }
+    }
+    // عندما تكون الورقة مليئة جداً نفضل الحواف الآمنة على وضع الختم فوق كلمة.
+    const edgeFallback = [{ x: 5, y: 5 }, { x: 95, y: 5 }, { x: 5, y: 95 }, { x: 95, y: 95 }, { x: 5, y: 50 }, { x: 95, y: 50 }];
+    const safeEdges = rect ? edgeFallback.filter((point) => {
+      const pointX = rect.left + (point.x / 100) * rect.width;
+      const pointY = rect.top + (point.y / 100) * rect.height;
+      return !blocked.some((area) => pointX + 18 > area.left && pointX - 18 < area.right && pointY + 18 > area.top && pointY - 18 < area.bottom);
+    }) : edgeFallback;
+    const pool = candidates.length ? [...candidates].sort(() => Math.random() - .5) : safeEdges.map((point) => ({ ...point, size: 32 }));
+    const stamps: OrnamentStamp[] = pool.slice(0, Math.min(n, pool.length)).map((point, index) => ({
+      id: stampId(), kind: kinds[index % kinds.length], x: point.x, y: point.y, size: point.size,
     }));
     onChange({ ...ornaments, stamps });
     setSelectedId(null);
@@ -190,7 +214,7 @@ export function StampEditor({ ornaments, onChange, children }: { ornaments: Exam
         <div className="row-between">
           <strong>أختام يدوية — اختر ختماً ثم اضغط على الورقة لوضعه</strong>
           <div className="row">
-            <button type="button" className="btn secondary" onClick={randomFill}>🎲 توزيع عشوائي</button>
+            <button type="button" className="btn secondary" onClick={randomFill}>🎲 توزيع عشوائي آمن</button>
             <button type="button" className="btn secondary" onClick={() => { onChange({ ...ornaments, stamps: [] }); setSelectedId(null); }}>مسح الكل</button>
           </div>
         </div>
@@ -217,10 +241,10 @@ export function StampEditor({ ornaments, onChange, children }: { ornaments: Exam
             <span className="tiny muted">الختم المحدد: {selected.kind}</span>
           </div>
         ) : (
-          <p className="tiny muted">اضغط أي ختم من اللوحة ثم انقر داخل الورقة لوضعه. اضغط ختماً موجوداً لتحديده وتغيير حجمه أو حذفه.</p>
+          <p className="tiny muted">اضغط أي ختم من اللوحة ثم انقر داخل الورقة لوضعه فوق السؤال أو في أي موضع تريده. اضغط ختماً موجوداً لتحديده وتغيير حجمه أو حذفه. التوزيع العشوائي يختار الفراغات فقط.</p>
         )}
       </div>
-      <div className="stamp-canvas" onClick={place} style={{ cursor: activeKind ? 'crosshair' : 'default' }}>
+      <div ref={canvasRef} className="stamp-canvas" onClick={place} style={{ cursor: activeKind ? 'crosshair' : 'default' }}>
         {children}
         {ornaments.stamps?.map((st) => (
           <span
@@ -233,8 +257,10 @@ export function StampEditor({ ornaments, onChange, children }: { ornaments: Exam
               left: `${st.x}%`,
               fontSize: st.size,
               lineHeight: 1,
-              opacity: Math.max(0.1, ornaments.opacity + 0.1),
+              // شفافية الأختام اليدوية هي نفسها التي اختارها المستخدم في لوحة المعاينة.
+              opacity: Math.max(0.04, Math.min(0.5, ornaments.opacity ?? 0.18)),
               transform: 'translate(-50%, -50%)',
+              zIndex: 4,
               cursor: 'pointer',
               border: selectedId === st.id ? '1.5px dashed var(--primary)' : '1.5px solid transparent',
               borderRadius: 4,

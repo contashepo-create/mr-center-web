@@ -623,7 +623,7 @@ tbody tr:hover { background: var(--surface-2); }
 }
 .stamp-chip:hover { border-color: var(--primary); }
 .stamp-chip.active { border-color: var(--primary); background: color-mix(in srgb, var(--primary) 18%, var(--surface-2)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary) 30%, transparent); }
-.stamp-canvas { position: relative; }
+.stamp-canvas { position: relative; isolation: isolate; }.stamp-canvas > .exam-paper { z-index: 1; }
 
 @media print {
   .exam-paper { border: none; box-shadow: none; border-radius: 0; }
@@ -833,12 +833,10 @@ tbody tr:hover { background: var(--surface-2); }
 /* طلبات نقل المجموعة في بوابة الطالب والإدارة */
 .student-transfer-guide { border-color:color-mix(in srgb,var(--success) 35%,var(--border)); background:linear-gradient(115deg,color-mix(in srgb,var(--success) 8%,var(--surface)),var(--surface)); }.student-transfer-guide h2,.student-transfer-guide p { margin:0; }.student-transfer-guide p { margin-top:4px; }.transfer-guide-icon { width:44px;height:44px;display:grid;place-items:center;border-radius:13px;color:var(--success);background:color-mix(in srgb,var(--success) 12%,transparent);font-size:1.35rem;font-weight:900; }.transfer-group-info { display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border); }.transfer-group-info:last-child{border-bottom:0}.transfer-group-info>span,.inquiry-kind-icon{width:30px;height:30px;display:grid;place-items:center;flex:0 0 auto;border-radius:9px;color:var(--primary);background:var(--primary-soft);font-weight:900}.transfer-group-info div{display:grid;gap:3px}.transfer-group-info p{margin:0;color:var(--muted);font-size:.76rem}.student-inquiry-row { display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:11px;align-items:start;padding:13px 0;border-bottom:1px solid var(--border); }.student-inquiry-row:last-child{border-bottom:0}.inquiry-main{display:grid;gap:6px}.inquiry-main p{margin:0;color:var(--muted);font-size:.83rem}.inquiry-main .notice{margin:1px 0 0}.student-inquiry-row time{color:var(--muted);font-size:.72rem;white-space:nowrap}.transfer-request-route{display:flex;align-items:center;flex-wrap:wrap;gap:9px;padding:10px 12px;border:1px solid color-mix(in srgb,var(--success) 28%,var(--border));border-radius:10px;color:var(--text);background:color-mix(in srgb,var(--success) 7%,var(--surface));font-size:.83rem}.transfer-request-route b{color:var(--success);font-size:1.1rem}@media(max-width:600px){.student-inquiry-row{grid-template-columns:30px minmax(0,1fr)}.student-inquiry-row time{grid-column:2}.transfer-guide-icon{display:none}}
 
-/* عند الطباعة المباشرة من معاينة الاختبار لا يظهر سوى الورقة الامتحانية. */
+/* لا نعزل ورقة الاختبار بإخفاء أبناء body أو بتموضع absolute: زر الطباعة ينشئ
+   مستنداً مستقلاً للورقة، فتظل الأسئلة في تدفق صفحات PDF السليم. */
 @media print {
-  body:has(.exam-paper) > * { visibility: hidden !important; }
-  body:has(.exam-paper) .exam-paper,
-  body:has(.exam-paper) .exam-paper * { visibility: visible !important; }
-  body:has(.exam-paper) .exam-paper { position: absolute; inset: 0; width: 100% !important; max-width: none !important; margin: 0 !important; }
+  .exam-paper { position: relative; inset: auto; width: 100% !important; max-width: none !important; margin: 0 !important; }
 }
 
 /* محرر الاختبارات: سؤال رئيسي بأسئلة فرعية، بنفس تسلسل الإنشاء العملي. */

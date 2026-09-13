@@ -159,8 +159,6 @@ DECLARE
   v_advance_used numeric := coalesce(p_advance_applied, 0);
   v_deduction numeric := coalesce(p_deduction, 0);
   v_total numeric := 0; v_cash_paid numeric := 0;
-  v_period_start date := date_trunc('month', coalesce(p_date, current_date))::date;
-  v_period_end date := (date_trunc('month', coalesce(p_date, current_date)) + interval '1 month')::date;
 BEGIN
   PERFORM public.assert_accounting_owner(p_center);
   v_employee_name := public.assert_accounting_employee(p_center, p_employee);
@@ -172,14 +170,12 @@ BEGIN
   -- قفل سجل سلف/تسويات الموظف قبل الحساب، حتى لا تُسوّى السلفة نفسها مرتين من طلبين متزامنين.
   PERFORM 1 FROM public.center_ledger
    WHERE center_id = p_center AND employee_id = p_employee AND entry_type IN ('advance','salary')
-     AND occurred_on >= v_period_start AND occurred_on < v_period_end
    FOR UPDATE;
   SELECT coalesce(sum(CASE WHEN entry_type = 'advance' THEN amount ELSE -advance_applied END), 0)
     INTO v_advance_balance
   FROM public.center_ledger
   WHERE center_id = p_center AND employee_id = p_employee
-    AND entry_type IN ('advance','salary')
-    AND occurred_on >= v_period_start AND occurred_on < v_period_end;
+    AND entry_type IN ('advance','salary');
 
   IF v_advance_used > v_advance_balance THEN RAISE EXCEPTION 'advance_exceeds_balance'; END IF;
   IF v_advance_used + v_deduction > v_total THEN RAISE EXCEPTION 'payroll_deductions_exceed_total'; END IF;
