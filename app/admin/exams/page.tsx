@@ -12,6 +12,7 @@ import { ALL_ORNAMENTS, ornamentsForSubject, subjectLabelFor } from '@/lib/exam-
 import { EGYPT_TYPES, egyptMeta } from '@/lib/exam-egyptian';
 import { deleteExam, fetchAttemptsForExam, fetchExams, fetchGrades, fetchGroups, fetchStudents, gradeAttemptManually, upsertExam } from '@/lib/api';
 import { can } from '@/lib/rbac';
+import { printExamPaper } from '@/lib/report';
 import type { AppExam, ExamAnswer, ExamAttempt, ExamAvailabilityMode, ExamDeliveryMode, ExamOrnaments, ExamQuestion, ExamQuestionType, ExamResultMode, Grade, Group, OnlineExamMode, PaperTemplate, Student } from '@/lib/types';
 import { EXAM_TYPE_LABEL, examMarksTotal, formatDate, normalizeAnswerText, validateExamDraft } from '@/lib/utils';
 
@@ -460,7 +461,7 @@ export default function AdminExamsPage() {
       subtitle={`${previewSource?.questions.length ?? questions.length} سؤال · ${previewSource?.total_score ?? total} درجة · ${previewSource?.duration_minutes ?? form.duration} دقيقة`}
       onClose={() => { setPreview(false); setPreviewSource(null); }}
       wide
-      footer={<div className="row"><Button type="button" variant="secondary" onClick={() => window.print()}>طباعة / PDF</Button><Button type="button" onClick={() => { setPreview(false); setPreviewSource(null); }}>إغلاق</Button></div>}
+      footer={<div className="row"><Button type="button" variant="secondary" onClick={() => printExamPaper()}>طباعة احترافية / PDF</Button><Button type="button" onClick={() => { setPreview(false); setPreviewSource(null); }}>إغلاق</Button></div>}
     >
       <div className="tabs" style={{ marginBottom: 16 }}><button type="button" className={`tab ${previewMode === 'paper' ? 'active' : ''}`} onClick={() => setPreviewMode('paper')}>🖨 ورقي (للطباعة)</button><button type="button" className={`tab ${previewMode === 'electronic' ? 'active' : ''}`} onClick={() => setPreviewMode('electronic')}>◉ إلكتروني</button></div>
       {previewMode === 'paper' ? previewSource ? <ExamPaper title={previewSource.title} subject={previewSource.subject} duration={String(previewSource.duration_minutes)} total={previewSource.total_score} questions={previewSource.questions} ornaments={previewSource.ornaments} template={previewSource.paper_template ?? 'classic'} /> : ornaments.placement === 'manual' ? <StampEditor ornaments={ornaments} onChange={setOrnaments}><ExamPaper title={form.title} subject={form.subject} duration={form.duration} total={total} questions={questions} ornaments={null} template={form.paper_template} /></StampEditor> : <ExamPaper title={form.title} subject={form.subject} duration={form.duration} total={total} questions={questions} ornaments={ornaments} template={form.paper_template} /> : <ElectronicExamView questions={previewSource?.questions ?? questions} />}

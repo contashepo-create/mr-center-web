@@ -4,95 +4,89 @@ export interface ReportSection {
   headers?: string[];
 }
 
-function esc(s: unknown): string {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+type ReportOperator = { name?: string; printedAt?: string; center?: string };
+
+function esc(value: unknown): string {
+  return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-export function buildReportHtml(title: string, subtitle: string, sections: ReportSection[], operator?: { name?: string; printedAt?: string; center?: string }): string {
-  const body = sections.map((sec) => `
-    <section>
-      <h2>${esc(sec.title)}</h2>
-      <table>
-        ${sec.headers ? `<thead><tr>${sec.headers.map((h) => `<th>${esc(h)}</th>`).join('')}</tr></thead>` : ''}
-        <tbody>${sec.rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`).join('') || '<tr><td>لا توجد بيانات</td></tr>'}</tbody>
-      </table>
-    </section>`).join('');
-  return `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" />
-  <title>${esc(title)}</title>
-  <style>
-    body{font-family:Tahoma,Arial,sans-serif;direction:rtl;padding:24px;color:#111;background:#fff}
-    h1{font-size:24px;margin:0 0 4px}.sub{color:#555;font-size:13px;margin-bottom:14px}.meta{font-size:11px;color:#666;border-bottom:1px solid #ddd;padding-bottom:10px;margin-bottom:18px}
-    h2{font-size:17px;color:#047857;margin:22px 0 8px}table{width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px}th,td{border:1px solid #ccc;padding:7px 9px;text-align:right;vertical-align:top}th{background:#ecfdf5}
-    @media print{button{display:none}}
-  </style></head><body>
-    <h1>${esc(title)}</h1><div class="sub">${esc(subtitle)}</div>
-    <div class="meta">${operator?.center ? `السنتر: ${esc(operator.center)} · ` : ''}نفذ التقرير: ${esc(operator?.name || 'غير محدد')} · وقت الطباعة: ${esc(operator?.printedAt || new Date().toLocaleString('ar-EG'))}</div>
-    ${body}</body></html>`;
+/** قالب A4 موحّد: رأس رسمي، بيانات تشغيل، جداول واضحة وتذييل للتوقيع والحفظ. */
+export function buildReportHtml(title: string, subtitle: string, sections: ReportSection[], operator?: ReportOperator): string {
+  const printedAt = operator?.printedAt || new Date().toLocaleString('ar-EG', { dateStyle: 'medium', timeStyle: 'short' });
+  const body = sections.map((section, index) => {
+    const headers = section.headers ?? [];
+    const tableHead = headers.length ? `<thead><tr>${headers.map((header) => `<th>${esc(header)}</th>`).join('')}</tr></thead>` : '';
+    const tableRows = section.rows.length ? section.rows.map((row) => `<tr>${row.map((cell) => `<td>${esc(cell)}</td>`).join('')}</tr>`).join('') : `<tr><td colspan="${Math.max(headers.length, 1)}" class="empty">لا توجد بيانات ضمن هذه الفترة</td></tr>`;
+    return `<section class="report-section"><div class="section-title"><span class="section-number">${String(index + 1).padStart(2, '0')}</span><h2>${esc(section.title)}</h2></div><div class="table-wrap"><table>${tableHead}<tbody>${tableRows}</tbody></table></div></section>`;
+  }).join('');
+  return `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>${esc(title)}</title><style>
+    @page{size:A4;margin:13mm 11mm 15mm}*{box-sizing:border-box}html{background:#eef4f1}body{margin:0;background:#fff;color:#16231f;font-family:"Tahoma","Arial",sans-serif;direction:rtl;font-size:12px;line-height:1.65;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .report-shell{max-width:210mm;margin:0 auto;padding:0 0 14px}.report-head{position:relative;overflow:hidden;padding:24px 28px 21px;background:linear-gradient(135deg,#064e3b 0%,#08765a 58%,#0b9c73 100%);color:#fff;border-bottom:5px solid #d7a931}.report-head:after{content:"";position:absolute;width:155px;height:155px;border:1px solid rgba(255,255,255,.25);border-radius:50%;left:-45px;top:-75px;box-shadow:0 0 0 24px rgba(255,255,255,.07),0 0 0 49px rgba(255,255,255,.05)}
+    .brand{position:relative;z-index:1;display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.brand-mark{display:flex;align-items:center;gap:10px;font-weight:700;font-size:13px;letter-spacing:.1px}.mark{display:inline-grid;place-items:center;width:31px;height:31px;border:1px solid rgba(255,255,255,.65);border-radius:10px;color:#f9d66a;font-size:17px}.report-type{margin:20px 0 2px;font-size:25px;line-height:1.3;font-weight:800}.report-subtitle{opacity:.88;font-size:12px}.report-code{position:relative;z-index:1;text-align:left;font-size:10px;opacity:.9;white-space:nowrap}
+    .metadata{display:flex;flex-wrap:wrap;gap:8px;padding:13px 20px;background:#f4faf7;border-bottom:1px solid #dbe9e1;color:#426157;font-size:10.5px}.metadata span{border:1px solid #d6e7dd;border-radius:999px;background:#fff;padding:4px 10px}.metadata b{color:#17634c}
+    main{padding:4px 20px}.report-section{margin-top:18px;break-inside:avoid}.section-title{display:flex;align-items:center;gap:8px;margin:0 0 8px;border-bottom:1px solid #d6e6dd;padding-bottom:6px}.section-title h2{margin:0;font-size:14px;color:#07563f}.section-number{display:inline-grid;place-items:center;width:25px;height:25px;border-radius:7px;background:#e0f0e8;color:#087254;font-size:9px;font-weight:bold;direction:ltr}
+    .table-wrap{overflow:hidden;border:1px solid #d5e2db;border-radius:8px}table{width:100%;border-collapse:collapse;font-size:11px}thead{background:#e8f5ee;color:#07563f}th{font-size:10.5px;font-weight:800;white-space:nowrap}th,td{padding:8px 9px;text-align:right;vertical-align:top;border-left:1px solid #e0ebe5;border-bottom:1px solid #e0ebe5}th:last-child,td:last-child{border-left:0}tbody tr:last-child td{border-bottom:0}tbody tr:nth-child(even){background:#f9fcfa}td{color:#2e443a}.empty{text-align:center;color:#6c8276;padding:16px}.report-foot{display:flex;justify-content:space-between;gap:22px;margin:24px 20px 0;padding-top:12px;border-top:1px dashed #b6cfc2;color:#5d7368;font-size:10px}.signature{min-width:155px;border-top:1px solid #8ca89a;padding-top:5px;text-align:center;margin-top:26px}.page-note{text-align:left;align-self:flex-end}
+    @media print{html{background:#fff}.report-shell{max-width:none}.report-head{border-bottom-width:4px}main{padding:2px 0}.metadata{padding-right:0;padding-left:0}.report-foot{margin-right:0;margin-left:0}.report-section{break-inside:avoid}.table-wrap{overflow:visible}thead{display:table-header-group}}
+  </style></head><body><div class="report-shell">
+    <header class="report-head"><div class="brand"><div class="brand-mark"><span class="mark">✦</span><span>${esc(operator?.center || 'MR CENTER')}</span></div><div class="report-code">وثيقة مالية / تعليمية معتمدة</div></div><h1 class="report-type">${esc(title)}</h1><div class="report-subtitle">${esc(subtitle)}</div></header>
+    <div class="metadata"><span><b>أعده:</b> ${esc(operator?.name || 'غير محدد')}</span><span><b>تاريخ الطباعة:</b> ${esc(printedAt)}</span><span><b>حالة الوثيقة:</b> للمتابعة والمراجعة</span></div>
+    <main>${body}</main><footer class="report-foot"><div class="signature">توقيع المسؤول</div><div class="signature">اعتماد الإدارة</div><div class="page-note">صادر من نظام MR Center</div></footer>
+  </div></body></html>`;
 }
 
-export function buildPayrollReportHtml(employee: { name: string; role?: string }, period: string, values: { base: number; bonus: number; advances: number; deductions: number; net: number }, operator?: { name?: string; center?: string }): string {
-  return buildReportHtml(`كشف راتب — ${employee.name}`, period, [{
-    title: 'تفاصيل الاستحقاق',
+export function buildPayrollReportHtml(employee: { name: string; role?: string }, period: string, values: { base: number; bonus: number; advances: number; deductions: number; net: number }, operator?: ReportOperator): string {
+  return buildReportHtml(`كشف صرف راتب — ${employee.name}`, period, [{
+    title: 'تفاصيل الاستحقاق والصرف',
     headers: ['البند', 'القيمة'],
     rows: [
       ['الدور', employee.role ?? '—'],
       ['الراتب الأساسي', `${values.base.toFixed(2)} جنيه`],
       ['المكافآت والعمولات', `${values.bonus.toFixed(2)} جنيه`],
-      ['السلف', `${values.advances.toFixed(2)} جنيه`],
-      ['الخصومات', `${values.deductions.toFixed(2)} جنيه`],
-      ['صافي المستحق', `${values.net.toFixed(2)} جنيه`],
+      ['سلف معتمدة للخصم', `${values.advances.toFixed(2)} جنيه`],
+      ['خصومات معالجة', `${values.deductions.toFixed(2)} جنيه`],
+      ['صافي النقد المصروف', `${values.net.toFixed(2)} جنيه`],
     ],
   }], operator);
 }
 
-export function buildCustodyReportHtml(title: string, period: string, rows: string[][], operator?: { name?: string; center?: string }): string {
+export function buildCustodyReportHtml(title: string, period: string, rows: string[][], operator?: ReportOperator): string {
   return buildReportHtml(title, period, [{
-    title: 'تسوية العهدة',
-    headers: ['التاريخ', 'المتوقع', 'المسلم', 'الحالة'],
+    title: 'التحصيل والتسليم والمطابقة',
+    headers: ['التاريخ', 'الموظف', 'التحصيل المتوقع', 'المسلّم للخزينة', 'النتيجة', 'ملاحظات'],
     rows,
   }], operator);
 }
 
-export function printReport(html: string): void {
-  // طباعة عبر iframe مخفي داخل نفس الصفحة — لا تعتمد على النوافذ المنبثقة
-  // (المتصفحات تحجب window.open فلا تعمل أزرار الطباعة/PDF).
-  const prev = document.getElementById('print-frame');
-  if (prev) prev.remove();
+/** يطبع ورقة الاختبار نفسها فقط، بعيداً عن أزرار المعاينة ونافذة الإدارة. */
+export function printExamPaper(): void {
+  const paper = document.querySelector('.exam-paper');
+  if (!paper) throw new Error('افتح معاينة الورقة أولاً ثم اختر الطباعة.');
+  const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]')).map((node) => node.outerHTML).join('\n');
+  printReport(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><title>ورقة اختبار</title>${styles}<style>
+    @page{size:A4;margin:10mm}html,body{background:#fff!important}body{padding:0!important}.print-exam-wrap{width:100%;margin:0 auto}.exam-paper{width:100%;max-width:none!important;box-shadow:none!important}@media print{.exam-paper{break-inside:auto}.exam-paper-section,.exam-paper-item{break-inside:avoid}}
+  </style></head><body><main class="print-exam-wrap">${paper.outerHTML}</main></body></html>`);
+}
 
+export function printReport(html: string): void {
+  // الطباعة داخل iframe منعاً لمشكلة النوافذ المنبثقة ولإبقاء التجربة متسقة على الهاتف والويب.
+  document.getElementById('print-frame')?.remove();
   const frame = document.createElement('iframe');
   frame.id = 'print-frame';
   frame.setAttribute('aria-hidden', 'true');
-  frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+  frame.style.cssText = 'position:fixed;left:-10000px;bottom:0;width:1px;height:1px;border:0;opacity:0;pointer-events:none;';
   document.body.appendChild(frame);
-
   const doc = frame.contentDocument ?? frame.contentWindow?.document;
   if (!doc) {
-    // مسار احتياطي: نافذة جديدة
-    const w = window.open('', '_blank');
-    if (!w) throw new Error('تعذر فتح نافذة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع.');
-    w.document.open();
-    w.document.write(html);
-    w.document.close();
+    const popup = window.open('', '_blank');
+    if (!popup) throw new Error('تعذر فتح نافذة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع.');
+    popup.document.open(); popup.document.write(html); popup.document.close();
     return;
   }
-
-  doc.open();
-  doc.write(html);
-  doc.close();
-
-  const cleanup = () => setTimeout(() => frame.remove(), 1500);
-  try {
-    frame.contentWindow?.addEventListener('afterprint', cleanup, { once: true });
-  } catch {
-    /* تجاهل */
-  }
-  // انتظر تحميل محتوى الإطار ثم اطبع
-  setTimeout(() => {
-    try {
-      frame.contentWindow?.focus();
-      frame.contentWindow?.print();
-    } catch {
-      cleanup();
-    }
+  doc.open(); doc.write(html); doc.close();
+  const cleanup = () => window.setTimeout(() => frame.remove(), 1500);
+  try { frame.contentWindow?.addEventListener('afterprint', cleanup, { once: true }); } catch { /* لا حاجة لإجراء إضافي */ }
+  window.setTimeout(() => {
+    try { frame.contentWindow?.focus(); frame.contentWindow?.print(); } catch { cleanup(); }
   }, 400);
 }

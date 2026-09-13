@@ -141,7 +141,7 @@ END; $$;
 GRANT EXECUTE ON FUNCTION public.record_staff_advance(uuid,uuid,numeric,date,text) TO authenticated;
 
 -- ----------------------------------------------------------------------------
--- ٥) تسوية راتب واحدة للموظف.
+-- ٥) صرف راتب واحد للموظف.
 -- amount = صافي النقد المدفوع، أما gross/bonus/commission فهي تكلفة التشغيل.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.record_payroll_settlement(
@@ -187,8 +187,8 @@ BEGIN
     created_by, created_by_name, period_month, period_year, deduction, gross_amount,
     bonus_amount, commission_amount, advance_applied, affects_profit
   ) VALUES (
-    p_center, 'expense', 'salary', 'تسوية راتب',
-    coalesce(nullif(trim(p_description), ''), 'تسوية راتب ' || v_employee_name), v_cash_paid,
+    p_center, 'expense', 'salary', 'صرف راتب',
+    coalesce(nullif(trim(p_description), ''), 'صرف راتب ' || v_employee_name), v_cash_paid,
     coalesce(p_date, CURRENT_DATE), p_employee, auth.uid(), coalesce(v_name, ''),
     extract(month from coalesce(p_date, CURRENT_DATE))::int,
     extract(year from coalesce(p_date, CURRENT_DATE))::int,

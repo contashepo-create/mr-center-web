@@ -38,7 +38,9 @@ has(sql, /ADD COLUMN IF NOT EXISTS gross_amount/i, 'SQL: payroll gross amount mi
 has(sql, /ADD COLUMN IF NOT EXISTS advance_applied/i, 'SQL: payroll advance settlement migration is missing');
 has(sql, /SET affects_profit = false[\s\S]{0,100}entry_type = 'advance'/i, 'SQL: advances must be excluded from profit impact');
 has(sql, /CREATE OR REPLACE FUNCTION public\.record_staff_advance/i, 'SQL: atomic staff advance RPC is missing');
-has(sql, /CREATE OR REPLACE FUNCTION public\.record_payroll_settlement/i, 'SQL: atomic payroll settlement RPC is missing');
+has(sql, /CREATE OR REPLACE FUNCTION public\.(record_payroll_settlement|record_salary_payment)/i, 'SQL: atomic payroll payment RPC is missing');
+has(sql, /CREATE TABLE IF NOT EXISTS public\.staff_deductions/i, 'SQL: staff deduction balance table is missing');
+has(sql, /CREATE OR REPLACE FUNCTION public\.record_staff_deduction/i, 'SQL: atomic staff deduction RPC is missing');
 has(sql, /advance_exceeds_balance/i, 'SQL: payroll must reject settling more than the advance balance');
 has(sql, /entry_type IN \('advance','salary'\)[\s\S]{0,120}FOR UPDATE/i, 'SQL: payroll must lock advance rows before settlement');
 has(sql, /CREATE OR REPLACE FUNCTION public\.record_staff_commission_payment/i, 'SQL: commission payment RPC is missing');
@@ -48,16 +50,19 @@ has(accounting, /gross_amount \?\? row\.amount/, 'Client accounting rules must u
 has(accounting, /- valueOf\(row\.deduction\)/, 'Client accounting rules must subtract salary deductions from operating cost');
 has(sql, /commission_amount, 0\) - coalesce\(deduction, 0\)/, 'SQL: fiscal close must subtract payroll deductions from operating cost');
 has(page, /record_manual_ledger_entry/, 'Accounting UI: manual income/expense RPC is not connected');
-has(page, /record_payroll_settlement/, 'Accounting UI: payroll settlement RPC is not connected');
+has(page, /record_salary_payment/, 'Accounting UI: payroll payment RPC is not connected');
+has(page, /staff_deductions/, 'Accounting UI: staff deductions are not connected');
+has(page, /preparePayroll/, 'Accounting UI: outstanding advances and deductions are not proposed before payment');
 has(page, /record_staff_advance/, 'Accounting UI: staff advance RPC is not connected');
 has(page, /record_staff_commission_payment/, 'Accounting UI: commission payment RPC is not connected');
 has(page, /payment_collection/, 'Accounting UI: automatic payment_collection income is not surfaced');
 has(page, /staff_commission_rules/, 'Accounting UI: commission rules are not connected');
-has(page, /buildPayrollReportHtml/, 'Accounting UI: payroll report export is missing');
+has(page, /printEmployeeStatement/, 'Accounting UI: comprehensive employee statement export is missing');
 has(page, /دفعات الطلاب لا تُدخل يدوياً/, 'Accounting UI: student-payment duplicate-income warning is missing');
 has(page, /CustodyWorkspace embedded/, 'Accounting UI: custody must be integrated as a tab');
 has(custody, /submit_staff_custody/, 'Custody workspace: submit_staff_custody RPC is missing');
-has(custody, /review_staff_custody/, 'Custody workspace: review_staff_custody RPC is missing');
+has(custody, /settle_staff_custody/, 'Custody workspace: practical custody settlement RPC is missing');
+has(custody, /get_custody_overview/, 'Custody workspace: employee collection overview RPC is missing');
 
 if (issues.length) {
   console.error('❌ accounting audit failed:\n' + issues.map((x) => `- ${x}`).join('\n'));

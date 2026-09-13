@@ -90,7 +90,7 @@ BEGIN
   IF cid IS NOT NULL THEN
     INSERT INTO public.center_ledger(center_id,kind,category,description,amount,occurred_on,created_by,created_by_name,source_payment_id,entry_type,period_month,period_year)
     VALUES(cid,'income','تحصيل طلاب','تحصيل من طالب',NEW.amount,NEW.payment_date,coalesce(NEW.collected_by,auth.uid()),coalesce(NEW.collected_by_name,collector_name,''),NEW.id,'payment_collection',extract(month from NEW.payment_date),extract(year from NEW.payment_date))
-    ON CONFLICT (source_payment_id) DO NOTHING;
+    ON CONFLICT DO NOTHING;
   END IF;
   RETURN NEW;
 END; $$;

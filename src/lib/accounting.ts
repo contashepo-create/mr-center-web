@@ -25,7 +25,7 @@ export interface AccountingLedgerRow {
 
 export const LEDGER_ENTRY_LABEL: Record<LedgerEntryType, string> = {
   general: 'حركة يدوية',
-  salary: 'تسوية راتب',
+  salary: 'صرف راتب',
   advance: 'سلفة موظف',
   bonus: 'مكافأة موظف',
   commission: 'عمولة مصروفة',
