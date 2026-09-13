@@ -36,7 +36,11 @@ function walkFiles(dir, out = []) {
 }
 
 const failures = [];
-assert(existsSync(join(androidRoot, 'app')), `ANDROID_REPO_PATH غير صحيح أو لا يحتوي app/: ${androidRoot}`, failures);
+if (!existsSync(join(androidRoot, 'app'))) {
+  // لا نتابع القراءة كي لا نخفي السبب الحقيقي وراء stack trace من readFileSync.
+  console.error(`❌ Android/Web parity comparison failed:\n- ANDROID_REPO_PATH غير صحيح أو لا يحتوي app/: ${androidRoot}`);
+  process.exit(1);
+}
 
 const routeMappings = [
   ['app/index.tsx', ['app/page.tsx']],

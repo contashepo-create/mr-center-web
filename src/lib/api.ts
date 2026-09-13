@@ -943,7 +943,7 @@ export async function fetchAdminStats(centerId: string): Promise<AdminStats> {
     sb.from('dues').select('id', { count: 'exact', head: true })
       .eq('center_id', centerId).eq('status', 'pending'),
     sb.from('payments').select('amount')
-      .eq('center_id', centerId).eq('month', now.getMonth() + 1).eq('year', now.getFullYear()),
+      .eq('center_id', centerId).eq('month', now.getMonth() + 1).eq('payment_year', now.getFullYear()),
   ]);
   const { data: todaySessions } = await sb.from('sessions').select('id')
     .eq('center_id', centerId).eq('session_date', today);

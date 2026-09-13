@@ -43,8 +43,11 @@ DECLARE v_role TEXT; v_center UUID; v_result JSONB;
 BEGIN
   SELECT role, center_id INTO v_role, v_center FROM public.profiles WHERE id = auth.uid();
   IF v_role NOT IN ('center_admin','super_admin') OR v_center IS NULL THEN RETURN '[]'::jsonb; END IF;
+  -- صلاحية المحاسبة تُحجب خادمياً عند انتهاء الفترة. إعادة قائمة فارغة هنا
+  -- تمنع 400 متوقعاً إذا فتحت صفحة الإعدادات قبل تحديث واجهة الاشتراك؛ لا
+  -- تكشف أي حركة مالية، وصفحة المحاسبة نفسها تبقى محجوبة عبر get_my_features.
   IF v_role = 'center_admin' AND NOT public.center_accounting_enabled(v_center) THEN
-    RAISE EXCEPTION 'accounting_not_enabled';
+    RETURN '[]'::jsonb;
   END IF;
   SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.starts_on DESC), '[]'::jsonb) INTO v_result
   FROM (

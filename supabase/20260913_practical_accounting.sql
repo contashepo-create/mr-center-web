@@ -267,7 +267,7 @@ BEGIN
   v_balance := v_year.opening_balance + v_cash_income - v_cash_expense;
   SELECT coalesce(sum(amount), 0) INTO v_pending FROM public.dues
    WHERE center_id = p_center AND status IN ('pending','partial')
-     AND make_date(year, month, 1) BETWEEN v_year.starts_on AND v_year.ends_on;
+     AND make_date(due_year, month, 1) BETWEEN v_year.starts_on AND v_year.ends_on;
 
   UPDATE public.center_fiscal_years SET status = 'closed', ends_on = v_year.ends_on,
     closing_income = v_income, closing_expense = v_expense, closing_balance = v_balance,

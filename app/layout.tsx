@@ -11,6 +11,10 @@ export const metadata: Metadata = {
   title: 'Mr Center',
   description: 'منصة إدارة السناتر التعليمية — ويب وموبايل بحساب واحد وبيانات مشتركة.',
   applicationName: 'Mr Center',
+  icons: {
+    icon: '/favicon.ico',
+    shortcut: '/favicon.ico',
+  },
 };
 
 export const viewport: Viewport = {

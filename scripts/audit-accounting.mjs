@@ -6,9 +6,25 @@ const api = readFileSync('src/lib/api.ts', 'utf8');
 const page = readFileSync('app/admin/accounting/page.tsx', 'utf8');
 const custody = readFileSync('src/components/accounting/custody-workspace.tsx', 'utf8');
 const accounting = readFileSync('src/lib/accounting.ts', 'utf8');
+const fiscalRepair = readFileSync('supabase/20260913_fiscal_runtime_repair.sql', 'utf8');
+const fiscalAccounting = readFileSync('supabase/20260912_fiscal_accounting.sql', 'utf8');
+const practicalAccounting = readFileSync('supabase/20260913_practical_accounting.sql', 'utf8');
+const liveE2e = readFileSync('scripts/e2e-live.mjs', 'utf8');
 
 const issues = [];
 const has = (text, re, label) => { if (!re.test(text)) issues.push(label); };
+
+// يضمن إصلاح توافق المخطط القديم (fiscal_year) مع API الويب الجديد، حتى لا يعيد
+// get_my_fiscal_years خطأ PostgreSQL/HTTP 400 عند وجود أعمدة السنة الحديثة.
+has(fiscalRepair, /ALTER TABLE public\.center_fiscal_years ADD COLUMN IF NOT EXISTS year_label TEXT/i, 'Fiscal repair: year_label compatibility column is missing');
+has(fiscalRepair, /ALTER TABLE public\.center_fiscal_years ADD COLUMN IF NOT EXISTS starts_on DATE/i, 'Fiscal repair: starts_on compatibility column is missing');
+has(fiscalRepair, /ALTER TABLE public\.center_fiscal_years ADD COLUMN IF NOT EXISTS ends_on DATE/i, 'Fiscal repair: ends_on compatibility column is missing');
+has(fiscalRepair, /CREATE OR REPLACE FUNCTION public\.get_my_fiscal_years\(\)/i, 'Fiscal repair: get_my_fiscal_years must be recreated');
+has(fiscalRepair, /NOT public\.center_accounting_enabled\(v_center\) THEN RETURN '\[\]'::JSONB/i, 'Fiscal repair: expired accounting calls must return an empty safe result');
+has(fiscalAccounting, /make_date\(due_year, month, 1\)/i, 'Fiscal close: must use dues.due_year, not removed legacy year');
+has(practicalAccounting, /make_date\(due_year, month, 1\)/i, 'Practical fiscal close: must use dues.due_year, not removed legacy year');
+has(api, /fetchAdminStats[\s\S]{0,1000}payment_year/i, 'Dashboard stats: must use payments.payment_year, not removed legacy year');
+has(liveE2e, /due_year: 2026[\s\S]{0,500}payment_year: 2026[\s\S]{0,500}grade_year: 2026/s, 'Live E2E: must use current due/payment/grade year column names');
 
 has(sql, /CREATE TABLE IF NOT EXISTS public\.center_ledger/i, 'SQL: center_ledger table is missing');
 has(sql, /kind TEXT NOT NULL CHECK \(kind IN \('income','expense'\)\)/i, 'SQL: ledger kind income/expense CHECK is missing');

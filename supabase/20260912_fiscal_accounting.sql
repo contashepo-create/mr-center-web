@@ -168,7 +168,9 @@ BEGIN
   SELECT role, center_id INTO v_role, v_center FROM public.profiles WHERE id = auth.uid();
   IF v_role NOT IN ('center_admin','super_admin') OR v_center IS NULL THEN RETURN '[]'::jsonb; END IF;
   IF v_role = 'center_admin' AND NOT public.center_accounting_enabled(v_center) THEN
-    RAISE EXCEPTION 'accounting_not_enabled';
+    -- لا تُعرض أي بيانات مالية بعد الانتهاء، لكن لا نرفع HTTP 400 متوقعاً
+    -- من صفحات الإعدادات/التعريف التي قد تستدعي القائمة قبل بوابة الواجهة.
+    RETURN '[]'::jsonb;
   END IF;
   SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.starts_on DESC), '[]'::jsonb) INTO v_result
   FROM (
@@ -240,7 +242,7 @@ BEGIN
   v_balance := v_year.opening_balance + v_income - v_expense;
   SELECT COALESCE(SUM(amount), 0) INTO v_pending FROM public.dues
    WHERE center_id = p_center AND status IN ('pending','partial')
-     AND make_date(year, month, 1) BETWEEN v_year.starts_on AND v_year.ends_on;
+     AND make_date(due_year, month, 1) BETWEEN v_year.starts_on AND v_year.ends_on;
 
   UPDATE public.center_fiscal_years
    SET status = 'closed', ends_on = v_year.ends_on,
