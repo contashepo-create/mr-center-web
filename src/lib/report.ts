@@ -8,6 +8,30 @@ export interface ReportSection {
 }
 
 type ReportOperator = { name?: string; printedAt?: string; center?: string; branding?: CenterPrintBranding };
+export type ExamPdfDetails = { title?: string; grade?: string; subject?: string; teacher?: string | string[]; author?: string };
+
+/**
+ * لا يستطيع المتصفح كتابة ملف PDF مباشرةً من نافذة الطباعة، لكنه يعتمد عنوان
+ * المستند كاسم مقترح في "حفظ بصيغة PDF". نوحّد الاسم ونزيل محارف الملفات
+ * المحجوزة حتى يصلح الاسم على Windows وmacOS وLinux.
+ */
+export function pdfDocumentTitle(...parts: Array<string | null | undefined>): string {
+  const title = parts
+    .map((part) => String(part ?? '').replace(/[\\/:*?"<>|؟]+/g, ' ').replace(/\s+/g, ' ').trim())
+    .filter(Boolean)
+    .join(' - ')
+    .slice(0, 170)
+    .trim();
+  return title || 'مستند MR Center';
+}
+
+function examPdfDocumentTitle(details: ExamPdfDetails = {}, paper?: Element): string {
+  const paperTitle = paper?.querySelector('.exam-paper-title')?.textContent?.trim();
+  const paperSubject = paper?.querySelector('.exam-paper-sub')?.textContent?.match(/المادة\s*:\s*([^·\n]+)/)?.[1]?.trim();
+  const teachers = (Array.isArray(details.teacher) ? details.teacher : [details.teacher]).filter((teacher): teacher is string => Boolean(teacher?.trim()));
+  const educator = teachers.length ? `المدرس ${teachers.join(' و ')}` : details.author?.trim() ? `إعداد ${details.author.trim()}` : '';
+  return pdfDocumentTitle('اختبار', details.grade, details.subject || paperSubject, educator, details.title || paperTitle);
+}
 
 function esc(value: unknown): string {
   return String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -90,7 +114,7 @@ export function buildReportHtml(title: string, subtitle: string, sections: Repor
     return `<section class="report-section"><div class="section-title"><span class="section-number">${String(index + 1).padStart(2, '0')}</span><h2>${esc(section.title)}</h2></div><div class="table-wrap"><table>${tableHead}<tbody>${tableRows}</tbody></table></div></section>`;
   }).join('');
   return `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>${esc(title)}</title><style>
+  <title>${esc(pdfDocumentTitle(title))}</title><style>
     @page{size:A4;margin:13mm 11mm ${bottomMargin}mm}*{box-sizing:border-box}html{background:#eef4f1}body{margin:0;background:#fff;color:#16231f;font-family:"Tahoma","Arial",sans-serif;direction:rtl;font-size:12px;line-height:1.65;-webkit-print-color-adjust:exact;print-color-adjust:exact}
     ${documentBrandingCss()}
     .report-shell{position:relative;z-index:1;max-width:210mm;margin:0 auto;padding:0 0 14px;--report-logo-space:0px}.report-head{position:relative;overflow:hidden;padding:19px 24px 16px;background:linear-gradient(135deg,#064e3b 0%,#08765a 58%,#0b9c73 100%);color:#fff;border-bottom:5px solid #d7a931}.report-head:after{content:"";position:absolute;width:155px;height:155px;border:1px solid rgba(255,255,255,.25);border-radius:50%;left:-45px;top:-75px;box-shadow:0 0 0 24px rgba(255,255,255,.07),0 0 0 49px rgba(255,255,255,.05)}.report-shell.has-print-logo.top_right .report-head{padding-right:calc(24px + var(--report-logo-space))}.report-shell.has-print-logo.top_left .report-head{padding-left:calc(24px + var(--report-logo-space))}.report-shell.has-print-logo.top_center .report-head{padding-top:calc(16px + var(--report-logo-space))}body:has(.report-shell.has-print-logo) .center-print-logo.top_right,body:has(.report-shell.has-print-logo) .center-print-logo.top_left,body:has(.report-shell.has-print-logo) .center-print-logo.top_center{top:15mm}
@@ -132,7 +156,7 @@ export async function printCenterReport(centerId: string | null | undefined, cre
 }
 
 /** يطبع ورقة الاختبار فقط، مع طبقات الهوية المتكررة على صفحاتها. */
-export function printExamPaper(branding: CenterPrintBranding = brandForCenter('MR Center')): void {
+export function printExamPaper(branding: CenterPrintBranding = brandForCenter('MR Center'), details: ExamPdfDetails = {}): void {
   const paper = document.querySelector('.exam-paper');
   if (!paper) throw new Error('افتح معاينة الورقة أولاً ثم اختر الطباعة.');
   // عند وضع الأختام اليدوية تكون الأختام التفاعلية أشقاء للورقة داخل stamp-canvas؛
@@ -141,17 +165,17 @@ export function printExamPaper(branding: CenterPrintBranding = brandForCenter('M
   const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]')).map((node) => node.outerHTML).join('\n');
   const bottomMargin = printBottomMarginMm(branding, 17);
   const logoReservation = examPaperLogoReservationCss(branding);
-  printReport(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><title>ورقة اختبار</title>${styles}<style>
-    @page{size:A4;margin:10mm 10mm ${bottomMargin}mm}html,body{background:#fff!important}body{padding:0!important}${documentBrandingCss()}.print-exam-wrap{position:relative;z-index:1;width:100%;margin:0 auto}.exam-paper{width:100%;max-width:none!important;box-shadow:none!important}${logoReservation}@media print{.exam-paper{break-inside:auto}.exam-paper-section,.exam-paper-item{break-inside:avoid}.exam-paper .paper-preview-branding,.exam-paper .exam-paper-bottom-note{display:none!important}/* globals.css يخفي واجهة التطبيق ويجعل الورقة absolute عند الطباعة المباشرة؛ نلغي ذلك داخل إطار PDF كي تبقى الورقة في تدفق الصفحات. */body:has(.exam-paper) .print-exam-wrap{display:block!important;position:static!important;visibility:visible!important}body:has(.exam-paper) .print-exam-wrap .stamp-canvas{display:block!important;position:relative!important;height:auto!important;visibility:visible!important}body:has(.exam-paper) .print-exam-wrap .exam-paper{display:block!important;position:relative!important;inset:auto!important;height:auto!important;min-height:0!important;width:100%!important;max-width:none!important;margin:0!important;visibility:visible!important}/* يتغلب صراحةً على قاعدة المعاينة العامة التي تخفي أبناء body عند طباعة الاختبار. */body:has(.exam-paper) .print-exam-wrap *,body:has(.exam-paper) .exam-paper *,body:has(.exam-paper) .center-print-overlay,body:has(.exam-paper) .center-print-overlay *,body:has(.exam-paper) .center-print-watermark,body:has(.exam-paper) .center-print-watermark *{visibility:visible!important}}
+  printReport(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><title>${esc(examPdfDocumentTitle(details, paper))}</title>${styles}<style>
+    @page{size:A4;margin:10mm 10mm ${bottomMargin}mm}html,body{background:#fff!important}body{padding:0!important}${documentBrandingCss()}.print-exam-wrap{position:relative;z-index:1;width:100%;margin:0 auto}.exam-paper{width:100%;max-width:none!important;box-shadow:none!important}${logoReservation}@media print{.exam-paper{break-inside:auto}.exam-paper-section,.exam-paper-item{break-inside:avoid}.exam-paper .paper-preview-branding,.exam-paper .exam-paper-bottom-note{display:none!important}/* نثبت الورقة داخل إطار PDF في تدفق الصفحات الطبيعي حتى يظهر كامل محتوى الأسئلة. */body:has(.exam-paper) .print-exam-wrap{display:block!important;position:static!important;visibility:visible!important}body:has(.exam-paper) .print-exam-wrap .stamp-canvas{display:block!important;position:relative!important;height:auto!important;visibility:visible!important}body:has(.exam-paper) .print-exam-wrap .exam-paper{display:block!important;position:relative!important;inset:auto!important;height:auto!important;min-height:0!important;width:100%!important;max-width:none!important;margin:0!important;visibility:visible!important}/* يتغلب صراحةً على قاعدة المعاينة العامة التي تخفي أبناء body عند طباعة الاختبار. */body:has(.exam-paper) .print-exam-wrap *,body:has(.exam-paper) .exam-paper *,body:has(.exam-paper) .center-print-overlay,body:has(.exam-paper) .center-print-overlay *,body:has(.exam-paper) .center-print-watermark,body:has(.exam-paper) .center-print-watermark *{visibility:visible!important}}
   </style></head><body>${documentBrandingMarkup(branding)}<main class="print-exam-wrap">${printable.outerHTML}</main></body></html>`);
 }
 
-export async function printCenterExamPaper(centerId: string | null | undefined): Promise<void> {
+export async function printCenterExamPaper(centerId: string | null | undefined, details: ExamPdfDetails = {}): Promise<void> {
   let branding = brandForCenter('MR Center');
   if (centerId) {
     try { branding = await fetchCenterPrintBranding(centerId); } catch { /* الطباعة تظل متاحة بالقالب الافتراضي */ }
   }
-  printExamPaper(branding);
+  printExamPaper(branding, details);
 }
 
 export function printReport(html: string): void {

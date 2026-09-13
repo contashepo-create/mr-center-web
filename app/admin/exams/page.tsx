@@ -491,6 +491,18 @@ export default function AdminExamsPage() {
   const previewPaperQuestions = previewSource?.questions ?? questions;
   const previewPaperSubject = previewSource?.subject ?? form.subject;
   const previewIsSavedPaper = Boolean(previewSource && (previewSource.delivery_mode ?? 'online') === 'paper');
+  /** عنوان نافذة الطباعة هو الاسم المقترح عند اختيار المتصفح «حفظ بصيغة PDF». */
+  const printPreviewPaper = () => {
+    const examTitle = previewSource?.title ?? form.title;
+    const gradeId = previewSource?.grade_id ?? form.grade_id;
+    const targetIds = previewSource?.target_group_ids ?? form.target_group_ids;
+    const gradeName = grades.find((grade) => grade.id === gradeId)?.name;
+    const scopedGroups = targetIds.length ? groups.filter((group) => targetIds.includes(group.id)) : groups.filter((group) => group.grade_id === gradeId);
+    const teacherNames = [...new Set(scopedGroups.map((group) => group.teacher_name.trim()).filter(Boolean))];
+    // إذا كان نطاق الورقة يضم معلمين مختلفين، يكون اسم معدّ الورقة أوضح من قائمة طويلة.
+    const teacher = teacherNames.length === 1 ? teacherNames[0] : undefined;
+    void printCenterExamPaper(centerId, { title: examTitle, grade: gradeName, subject: previewPaperSubject, teacher, author: profile?.full_name });
+  };
 
   if (tryoutOpen) return <CreatorExamTryout title={form.title} subject={form.subject} duration={Number(form.duration) || 30} questions={questions} onClose={() => setTryoutOpen(false)} />;
 
@@ -520,7 +532,7 @@ export default function AdminExamsPage() {
       subtitle={`${previewSource?.questions.length ?? questions.length} سؤال · ${previewSource?.total_score ?? total} درجة · ${previewSource?.duration_minutes ?? form.duration} دقيقة`}
       onClose={() => { setPreview(false); setPreviewSource(null); }}
       wide
-      footer={<div className="row">{previewIsSavedPaper && previewMode === 'paper' ? <Button type="button" variant="secondary" disabled={savingPreviewPaper} onClick={() => void savePreviewPaperAppearance()}>{savingPreviewPaper ? 'جارٍ حفظ شكل الورقة...' : 'حفظ القالب والزخارف'}</Button> : null}<Button type="button" variant="secondary" onClick={() => void printCenterExamPaper(centerId)}>طباعة احترافية / PDF</Button><Button type="button" onClick={() => { setPreview(false); setPreviewSource(null); }}>إغلاق</Button></div>}
+      footer={<div className="row">{previewIsSavedPaper && previewMode === 'paper' ? <Button type="button" variant="secondary" disabled={savingPreviewPaper} onClick={() => void savePreviewPaperAppearance()}>{savingPreviewPaper ? 'جارٍ حفظ شكل الورقة...' : 'حفظ القالب والزخارف'}</Button> : null}<Button type="button" variant="secondary" onClick={printPreviewPaper}>طباعة احترافية / PDF</Button><Button type="button" onClick={() => { setPreview(false); setPreviewSource(null); }}>إغلاق</Button></div>}
     >
       <div className="tabs" style={{ marginBottom: 16 }}><button type="button" className={`tab ${previewMode === 'paper' ? 'active' : ''}`} onClick={() => setPreviewMode('paper')}>🖨 ورقي (للطباعة)</button><button type="button" className={`tab ${previewMode === 'electronic' ? 'active' : ''}`} onClick={() => setPreviewMode('electronic')}>◉ إلكتروني</button></div>
       {previewMode === 'paper' ? <div className="paper-preview-workspace"><PaperPreviewControls subject={previewPaperSubject} template={previewPaperTemplateValue} ornaments={previewPaperOrnamentsValue} layout={previewPaperLayout} onTemplate={updatePreviewPaperTemplate} onOrnaments={updatePreviewPaperOrnaments} onLayout={setPreviewPaperLayout} /><div className="paper-preview-canvas">{previewPaperOrnamentsValue.placement === 'manual' ? <StampEditor ornaments={previewPaperOrnamentsValue} onChange={updatePreviewPaperOrnaments}><ExamPaper title={previewSource?.title ?? form.title} subject={previewPaperSubject} duration={String(previewSource?.duration_minutes ?? form.duration)} total={previewSource?.total_score ?? total} questions={previewPaperQuestions} ornaments={null} template={previewPaperTemplateValue} printLayout={previewPaperLayout} footerText={previewSource?.paper_footer ?? form.paper_footer} branding={printBranding} /></StampEditor> : <ExamPaper title={previewSource?.title ?? form.title} subject={previewPaperSubject} duration={String(previewSource?.duration_minutes ?? form.duration)} total={previewSource?.total_score ?? total} questions={previewPaperQuestions} ornaments={previewPaperOrnamentsValue} template={previewPaperTemplateValue} printLayout={previewPaperLayout} footerText={previewSource?.paper_footer ?? form.paper_footer} branding={printBranding} />}</div></div> : <ElectronicExamView questions={previewSource?.questions ?? questions} />}

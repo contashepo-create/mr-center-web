@@ -32,6 +32,7 @@ import { shouldExposeStoredSession } from '../src/lib/auth/clientSession';
 import { operatingExpense, periodTotals, summarizeEmployeePayroll } from '../src/lib/accounting';
 import { paperSections } from '../src/lib/exam-egyptian';
 import { brandForCenter, documentFooterText, normalizeCenterPrintSettings, watermarkGridColumns, watermarkRepeatCount } from '../src/lib/printing';
+import { pdfDocumentTitle } from '../src/lib/report';
 
 function profile(role: Profile['role'], perms: Profile['perms'] = {}, active = true): Profile {
   return {
@@ -43,6 +44,8 @@ function profile(role: Profile['role'], perms: Profile['perms'] = {}, active = t
 
 assert.equal(normalizePhone('٠١٠ 123-٤٥٦٧٨'), '01012345678');
 assert.equal(normalizeCenterCode(' ab 12 '), 'AB12');
+assert.equal(pdfDocumentTitle('اختبار', 'الصف الأول', 'علوم', 'المدرس مستر أحمد'), 'اختبار - الصف الأول - علوم - المدرس مستر أحمد');
+assert.equal(pdfDocumentTitle('تقرير: مالي/شهري؟'), 'تقرير مالي شهري');
 assert.equal(isValidCenterCode('ABC123'), true);
 assert.equal(isValidCenterCode('AB'), false);
 assert.equal(isValidEmail('a@b.com'), true);
