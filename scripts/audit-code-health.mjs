@@ -97,6 +97,7 @@ const duplicates = exports.filter((name, i) => exports.indexOf(name) !== i);
 if (duplicates.length) issues.push(`src/lib/api.ts: duplicate exported functions: ${[...new Set(duplicates)].join(', ')}`);
 
 if (!existsSync(join(root, '.env.example'))) issues.push('.env.example is missing');
+if (!existsSync(join(root, 'app', 'favicon.ico'))) issues.push('app/favicon.ico is missing (browsers would receive a 404)');
 
 if (issues.length) {
   console.error('❌ code health audit failed:\n' + issues.map((x) => `- ${x}`).join('\n'));

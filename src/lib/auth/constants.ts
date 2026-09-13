@@ -18,8 +18,15 @@ export const REFRESH_COOKIE = 'mr-refresh-token';
 /** مدة صلاحية كوكيز رمز التجديد (بالثواني — 7 أيام). */
 export const REFRESH_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 
-/** قبل انتهاء رمز الوصول بهذا الهامش (بالمللي ثانية) نجدده استباقياً. */
+/** قبل انتهاء رمز الوصول بهذا الهامش (بالمللي ثانية) نجددّه استباقياً. */
 export const ACCESS_REFRESH_MARGIN_MS = 5 * 60 * 1000;
+
+/**
+ * هامش Supabase الداخلي لقراءة الجلسة. عندما لا يتوفر refresh token محلياً
+ * نخفي الجلسة القريبة من الانتهاء عن SDK ونجددها عبر كوكيز HttpOnly أولاً.
+ * دقيقتان أكبر من هامش SDK الحالي (90 ثانية) لتفادي AuthSessionMissingError.
+ */
+export const ACCESS_TOKEN_SAFE_READ_MARGIN_MS = 2 * 60 * 1000;
 
 /** مسارات واجهات المصادقة الخادمية. */
 export const AUTH_API = {

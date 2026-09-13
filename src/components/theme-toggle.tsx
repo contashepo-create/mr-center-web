@@ -10,7 +10,7 @@ function currentMode(): Mode {
   return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
 }
 
-export function ThemeToggle({ variant = 'ghost' as const }: { variant?: 'secondary' | 'ghost' }) {
+export function ThemeToggle({ variant = 'ghost' as const, compact = false }: { variant?: 'secondary' | 'ghost'; compact?: boolean }) {
   const [mode, setMode] = useState<Mode>('dark');
 
   useEffect(() => {
@@ -25,8 +25,8 @@ export function ThemeToggle({ variant = 'ghost' as const }: { variant?: 'seconda
   };
 
   return (
-    <Button type="button" variant={variant} onClick={toggle} title={mode === 'dark' ? 'الوضع الفاتح' : 'الوضع الداكن'}>
-      {mode === 'dark' ? '☀︎ فاتح' : '☾ داكن'}
+    <Button type="button" variant={variant} className={compact ? 'communication-action theme-action' : ''} onClick={toggle} title={mode === 'dark' ? 'تفعيل الوضع الفاتح' : 'تفعيل الوضع الداكن'} aria-label={mode === 'dark' ? 'تفعيل الوضع الفاتح' : 'تفعيل الوضع الداكن'}>
+      {compact ? (mode === 'dark' ? '☀︎' : '☾') : (mode === 'dark' ? '☀︎ فاتح' : '☾ داكن')}
     </Button>
   );
 }

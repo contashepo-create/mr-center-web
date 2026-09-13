@@ -1,0 +1,647 @@
+diff --git a/app/(admin)/(tabs)/more.tsx b/app/(admin)/(tabs)/more.tsx
+index f007795ed9c55e631b7c33645587c4d4f7326cd4..4ea9fc9019bc07a32adef47047ddc8496ea3943e 100644
+--- a/app/(admin)/(tabs)/more.tsx
++++ b/app/(admin)/(tabs)/more.tsx
+@@ -144,7 +144,6 @@ export default function MoreScreen() {
+ 
+         <SectionTitle title="الإدارة" />
+         <ListItem title="إشعارات الطلاب" subtitle="بث جماعي فوري ومجاني داخل التطبيق" icon="notifications" iconColor={colors.primary} onPress={() => router.push('/notifications')} />
+-        <ListItem title="إشعارات المطور" subtitle="تنبيهات مخصصة لحسابك أو دورك في السنتر" icon="shield-checkmark" iconColor={colors.warning} onPress={() => router.push('/dev-notices')} />
+         <ListItem title="واتساب السنتر" subtitle="تنبيهات وتقارير ومستحقات مباشرة" icon="logo-whatsapp" iconColor={colors.success} onPress={() => router.push('/whatsapp')} />
+         <ListItem title="المدفوعات والمستحقات" subtitle="توليد الاستحقاقات الشهرية وتسجيل الدفعات" icon="wallet" iconColor={colors.cyan} onPress={() => router.push('/payments')} />
+         {isOwner(profile) ? (accountingEnabled ? <ListItem title="الحسابات" subtitle="إيرادات ومصروفات وقائمة مالية للسنتر" icon="calculator" iconColor={colors.success} onPress={() => router.push('/accounting')} /> : <ListItem title="الحسابات (خدمة مدفوعة)" subtitle="اعرف مزاياها واطلب تفعيلها" icon="lock-closed" iconColor={colors.warning} onPress={() => router.push('/accounting')} />) : null}
+@@ -155,7 +154,6 @@ export default function MoreScreen() {
+             <ListItem title="المدرسون" subtitle="تفعيل وصلاحيات ومجموعات المدرسين" icon="briefcase" iconColor={colors.primary} onPress={() => router.push('/teachers')} />
+             <ListItem title="الباقات والترقية" subtitle="خطتك وطلبات الترقية للمطور" icon="card" iconColor={colors.success} onPress={() => router.push('/subscription')} />
+             <ListItem title="سجل العمليات" subtitle="من فعل ماذا ومتى" icon="receipt" iconColor={colors.info} onPress={() => router.push('/activity')} />
+-            <ListItem title="الدعم الفني" subtitle="محادثة مباشرة مع مطور التطبيق" icon="chatbubbles" iconColor={colors.warning} onPress={() => router.push('/support')} />
+             <ListItem title="الإعدادات والاشتراك" subtitle="بيانات السنتر وحالة اشتراكك" icon="settings" iconColor={colors.primary} onPress={() => router.push('/admin-settings')} />
+           </>
+         )}
+diff --git a/app/(admin)/_layout.tsx b/app/(admin)/_layout.tsx
+index af9cb9c89954fcbe3aa5085bff67de553d8d3e87..23e4bafa8652d4fa79fd5b913689c7cee36498b5 100644
+--- a/app/(admin)/_layout.tsx
++++ b/app/(admin)/_layout.tsx
+@@ -8,6 +8,7 @@ import { Stack } from 'expo-router';
+ import React from 'react';
+ import { StyleSheet, View } from 'react-native';
+ import { LoadingView } from '../../src/components/controls';
++import { CommunicationHeader } from '../../src/components/CommunicationHeader';
+ import { useSession } from '../../src/lib/session';
+ import { isOwner, isStaff } from '../../src/lib/staff';
+ import { colors, themedStyles } from '../../src/theme';
+@@ -25,6 +26,7 @@ export default function AdminLayout() {
+ 
+   return (
+     <View style={styles.root}>
++      <CommunicationHeader />
+       <Stack
+         screenOptions={{
+           headerShown: false,
+diff --git a/app/(admin)/support.tsx b/app/(admin)/support.tsx
+index 388d7bd766c6718a4eefbf3fc1b6e544d5593bf3..349dd7736c7f70d28303ec51f7c14e853305a331 100644
+--- a/app/(admin)/support.tsx
++++ b/app/(admin)/support.tsx
+@@ -9,7 +9,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
+ import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+ import { AppButton, AppInput, Card, EmptyState, LoadingView, NoAccess } from '../../src/components/controls';
+ import { BackHeader, GradientScreen } from '../../src/components/layout';
+-import { fetchSupportMessages, sendSupportMessage } from '../../src/lib/api';
++import { fetchSupportMessages, markMySupportMessagesRead, sendSupportMessage } from '../../src/lib/api';
+ import { useSession } from '../../src/lib/session';
+ import { isOwner } from '../../src/lib/staff';
+ import type { SupportMessage } from '../../src/lib/types';
+@@ -29,6 +29,7 @@ export default function SupportScreen() {
+     if (!centerId) { setLoading(false); return; }
+     try {
+       setMessages(await fetchSupportMessages(centerId));
++      await markMySupportMessagesRead(centerId);
+     } catch (e) {
+       Alert.alert('تعذر التحميل', arabicError(e));
+     } finally {
+diff --git a/app/(student)/_layout.tsx b/app/(student)/_layout.tsx
+index be79a7afdd6e39b1ab8f8bfb6c886772673d387c..17c0c15774b761b8f76aed5635f650d510fe5f1b 100644
+--- a/app/(student)/_layout.tsx
++++ b/app/(student)/_layout.tsx
+@@ -7,6 +7,7 @@ import { Stack } from 'expo-router';
+ import React from 'react';
+ import { StyleSheet, View } from 'react-native';
+ import { LoadingView } from '../../src/components/controls';
++import { CommunicationHeader } from '../../src/components/CommunicationHeader';
+ import { useSession } from '../../src/lib/session';
+ import { colors, themedStyles } from '../../src/theme';
+ 
+@@ -23,6 +24,7 @@ export default function StudentLayout() {
+ 
+   return (
+     <View style={styles.root}>
++      <CommunicationHeader />
+       <Stack
+         screenOptions={{
+           headerShown: false,
+diff --git a/app/developer/_layout.tsx b/app/developer/_layout.tsx
+index 79e344630fd4c0031202875c6858490d8ca76b43..793be69d76972c24d50842ef3cbe28345114afe6 100644
+--- a/app/developer/_layout.tsx
++++ b/app/developer/_layout.tsx
+@@ -1,21 +1,18 @@
+ // ============================================================
+-// منطقة المطور — مجرد Stack؛ الحماية داخل كل صفحة عبر DeveloperGate
+-// (البوابة كانت هنا سابقاً داخل الـ Layout فتعطلت حقول الكتابة على أندرويد،
+-//  لذا نُقلت لصفحة عادية مثل باقي شاشات الدخول التي تعمل بلا مشاكل)
++// منطقة المطور — Stack مع مركز التواصل العلوي؛ الحماية داخل كل صفحة.
+ // ============================================================
+ 
+ import { Stack } from 'expo-router';
+ import React from 'react';
+-import { colors } from '../../src/theme';
++import { StyleSheet, View } from 'react-native';
++import { CommunicationHeader } from '../../src/components/CommunicationHeader';
++import { colors, themedStyles } from '../../src/theme';
+ 
+ export default function DeveloperLayout() {
+-  return (
+-    <Stack
+-      screenOptions={{
+-        headerShown: false,
+-        animation: 'fade',
+-        contentStyle: { backgroundColor: colors.bg },
+-      }}
+-    />
+-  );
++  return <View style={styles.root}>
++    <CommunicationHeader />
++    <Stack screenOptions={{ headerShown: false, animation: 'fade', contentStyle: { backgroundColor: colors.bg } }} />
++  </View>;
+ }
++
++const styles = themedStyles(() => StyleSheet.create({ root: { flex: 1, backgroundColor: colors.bg } }));
+diff --git a/app/developer/broadcast.tsx b/app/developer/broadcast.tsx
+index 18726a6cade2ff65b6eceda4c56440328fbbc911..fe024c0348ca45356b66d44470a72be167a63113 100644
+--- a/app/developer/broadcast.tsx
++++ b/app/developer/broadcast.tsx
+@@ -11,18 +11,28 @@ import { BackHeader, GradientScreen, KeyboardScreen } from '../../src/components
+ import { FormMessage, OptionPicker } from '../../src/components/pickers';
+ import { devFetchCenters, developerBroadcastNotification, type CenterWithSub } from '../../src/lib/api';
+ import { useSession } from '../../src/lib/session';
+-import type { CenterBroadcastDelivery, DeveloperBroadcastChannel } from '../../src/lib/types';
++import type { CenterBroadcastDelivery, DeveloperBroadcastChannel, DeveloperBroadcastPresentation } from '../../src/lib/types';
+ import { arabicError } from '../../src/lib/utils';
+ import { colors, font, radius, spacing, themedStyles } from '../../src/theme';
+ 
+ type StaffScope = 'all_centers' | 'one_center';
+ 
+ const channels: { value: DeveloperBroadcastChannel; label: string; description: string }[] = [
+-  { value: 'center', label: '١. سنتر محدد', description: 'صاحب السنتر فقط أو صاحبه وطلابه.' },
+-  { value: 'all_owners', label: '٢. أصحاب السناتر كلها', description: 'رسالة لأصحاب كل السناتر فقط.' },
+-  { value: 'all_owners_students', label: '٣. السناتر وطلابها كلها', description: 'رسالة لأصحاب السناتر وكل الطلاب.' },
+-  { value: 'all_students', label: '٤. الطلاب كلها فقط', description: 'لا تصل لأصحاب السناتر أو الموظفين.' },
+-  { value: 'staff', label: '٥. موظفو السناتر', description: 'مدرسون ومديرون وسكرتارية، في الكل أو سنتر معين.' },
++  { value: 'center', label: 'سنتر محدد', description: 'اختر السنتر وأي مزيج من مالكه وموظفيه وطلابه.' },
++  { value: 'all_owners', label: 'أصحاب السناتر', description: 'أصحاب السناتر فقط.' },
++  { value: 'all_owners_staff', label: 'أصحاب السناتر وموظفوهم', description: 'المالكون والموظفون النشطون فقط.' },
++  { value: 'all_owners_students', label: 'كل أعضاء السناتر', description: 'المالكون والموظفون النشطون والطلاب، مرة واحدة لكل حساب.' },
++  { value: 'all_students', label: 'الطلاب فقط', description: 'كل الطلاب دون مالكي السناتر أو موظفيهم.' },
++  { value: 'staff', label: 'الموظفون فقط', description: 'في كل السناتر أو سنتر واحد.' },
++  { value: 'all_project', label: 'كل حسابات المشروع', description: 'كل أصحاب السناتر وموظفيهم وطلابهم.' },
++];
++const deliveries: { value: CenterBroadcastDelivery; label: string }[] = [
++  { value: 'owners', label: 'صاحب السنتر فقط' }, { value: 'owners_staff', label: 'المالك والموظفون' },
++  { value: 'owners_students', label: 'المالك والموظفون والطلاب' },
++  { value: 'students', label: 'الطلاب فقط' }, { value: 'staff', label: 'الموظفون فقط' }, { value: 'everyone', label: 'كل حسابات السنتر' },
++];
++const presentations: { value: DeveloperBroadcastPresentation; label: string }[] = [
++  { value: 'notification', label: 'إشعار عادي (زر الجرس)' }, { value: 'message', label: 'رسالة (زر الرسائل)' }, { value: 'urgent', label: 'تنبيه طارئ (نافذة فورية)' },
+ ];
+ 
+ export default function DevBroadcastScreen() {
+@@ -32,6 +42,7 @@ export default function DevBroadcastScreen() {
+   const [channel, setChannel] = useState<DeveloperBroadcastChannel>('center');
+   const [centerId, setCenterId] = useState<string | null>(null);
+   const [centerDelivery, setCenterDelivery] = useState<CenterBroadcastDelivery>('owners');
++  const [presentation, setPresentation] = useState<DeveloperBroadcastPresentation>('notification');
+   const [staffScope, setStaffScope] = useState<StaffScope>('all_centers');
+   const [title, setTitle] = useState('');
+   const [body, setBody] = useState('');
+@@ -55,10 +66,12 @@ export default function DevBroadcastScreen() {
+   const selectedCenter = useMemo(() => centers.find((center) => center.id === centerId), [centers, centerId]);
+   const recipients = useMemo(() => {
+     const name = selectedCenter?.name ? `سنتر «${selectedCenter.name}»` : 'السنتر المختار';
+-    if (channel === 'center') return centerDelivery === 'owners' ? `صاحب ${name} فقط` : `صاحب ${name} وطلابه`;
++    if (channel === 'center') return `${deliveries.find((item) => item.value === centerDelivery)?.label ?? 'المستلمون'} في ${name}`;
+     if (channel === 'all_owners') return 'أصحاب كل السناتر';
+-    if (channel === 'all_owners_students') return 'أصحاب كل السناتر وكل الطلاب';
++    if (channel === 'all_owners_staff') return 'أصحاب السناتر وموظفوهم النشطون';
++    if (channel === 'all_owners_students') return 'أصحاب السناتر وموظفوهم وطلابهم، مرة واحدة لكل حساب';
+     if (channel === 'all_students') return 'كل الطلاب فقط';
++    if (channel === 'all_project') return 'كل حسابات السناتر المرتبطة بالمشروع';
+     return staffScope === 'all_centers' ? 'الموظفون النشطون في كل السناتر' : `الموظفون النشطون في ${name}`;
+   }, [channel, centerDelivery, staffScope, selectedCenter]);
+ 
+@@ -78,9 +91,10 @@ export default function DevBroadcastScreen() {
+         body,
+         centerId: needsCenter ? centerId : null,
+         centerDelivery: channel === 'center' ? centerDelivery : null,
++        presentation,
+       });
+       setTitle(''); setBody('');
+-      Alert.alert('تم البث', `استهدف ${result.recipient_accounts} حساباً في ${result.centers} سنتر.`);
++      Alert.alert('تم البث', `استهدف ${result.recipient_accounts} حساباً في ${result.centers} سنتر، مرة واحدة لكل حساب.`);
+     } catch (error) {
+       setFormError(arabicError(error));
+     } finally {
+@@ -90,7 +104,7 @@ export default function DevBroadcastScreen() {
+ 
+   return (
+     <GradientScreen>
+-      <BackHeader title="بث وإشعارات العملاء" subtitle="اختر واحدة من القنوات الخمس بدقة" />
++      <BackHeader title="بث وإشعارات العملاء" subtitle="اختر الجمهور وطريقة الظهور؛ الخادم يمنع التكرار" />
+       {loading ? <LoadingView message="جاري تحميل السناتر..." /> : <KeyboardScreen>
+         <Card>
+           <SectionTitle title="قناة البث" />
+@@ -115,9 +129,14 @@ export default function DevBroadcastScreen() {
+ 
+           {channel === 'center' ? <OptionPicker
+             label="مستلمو رسالة السنتر" icon="person" value={centerDelivery}
+-            options={[{ value: 'owners', label: 'صاحب السنتر فقط' }, { value: 'owners_students', label: 'صاحب السنتر وطلابه' }]}
++            options={deliveries}
+             onChange={(value) => setCenterDelivery(value as CenterBroadcastDelivery)}
+           /> : null}
++          <OptionPicker
++            label="طريقة الظهور" icon="eye" value={presentation}
++            options={presentations}
++            onChange={(value) => setPresentation(value as DeveloperBroadcastPresentation)}
++          />
+ 
+           <View style={styles.recipientBox}><Text style={styles.recipientLabel}>المستلمون</Text><Text style={styles.recipientText}>{recipients}</Text></View>
+           <AppInput label="العنوان" icon="text" placeholder="مثال: تحديث مهم الليلة" value={title} onChangeText={setTitle} maxLength={180} />
+diff --git a/app/developer/index.tsx b/app/developer/index.tsx
+index 9beb50d3bbd998064cf69c5ab036834dae4065d4..ac6d3fed7d164220151f94c14a97f39978b67dbd 100644
+--- a/app/developer/index.tsx
++++ b/app/developer/index.tsx
+@@ -6,27 +6,30 @@ import { Ionicons } from '@expo/vector-icons';
+ import { LinearGradient } from 'expo-linear-gradient';
+ import { router, useFocusEffect } from 'expo-router';
+ import React, { useCallback, useState } from 'react';
+-import { Alert, StyleSheet, Text, View } from 'react-native';
++import { StyleSheet, Text, View } from 'react-native';
+ import { Card, ListItem, LoadingView, SectionTitle, StatCard } from '../../src/components/controls';
+ import { DeveloperGate } from '../../src/components/DeveloperGate';
+ import { GradientScreen, KeyboardScreen, ScreenHeader } from '../../src/components/layout';
+-import { devFetchCenters, devFetchProfilesCount } from '../../src/lib/api';
++import { devFetchCenters, devFetchProfilesCount, devListCenterOwnerPresence, type CenterOwnerPresence } from '../../src/lib/api';
+ import { getActiveConfig } from '../../src/lib/supabase';
+ import { useSession } from '../../src/lib/session';
++import { formatDate } from '../../src/lib/utils';
+ import { colors, font, gradients, radius, spacing, themedStyles } from '../../src/theme';
+ 
+ export default function DeveloperHome() {
+-  const { profile, ready, signOut } = useSession();
++  const { profile, ready } = useSession();
+   const [centers, setCenters] = useState(0);
+   const [users, setUsers] = useState({ total: 0, byRole: {} as Record<string, number> });
++  const [lastOwner, setLastOwner] = useState<CenterOwnerPresence | null>(null);
+   const cfg = getActiveConfig();
+ 
+   // كل الـ Hooks أولاً قبل أي خروج مبكر (قواعد Hooks)
+   const load = useCallback(async () => {
+     try {
+-      const [c, p] = await Promise.all([devFetchCenters(), devFetchProfilesCount()]);
++      const [c, p, presence] = await Promise.all([devFetchCenters(), devFetchProfilesCount(), devListCenterOwnerPresence().catch(() => [])]);
+       setCenters(c.length);
+       setUsers(p);
++      setLastOwner(presence[0] ?? null);
+     } catch { /* ignore */ }
+   }, []);
+ 
+@@ -43,13 +46,6 @@ export default function DeveloperHome() {
+   }
+   if (profile?.role !== 'super_admin') return <DeveloperGate />;
+ 
+-  const confirmSignOut = () => {
+-    Alert.alert('تسجيل الخروج', 'خروج المطور؟', [
+-      { text: 'إلغاء', style: 'cancel' },
+-      { text: 'خروج', style: 'destructive', onPress: signOut },
+-    ]);
+-  };
+-
+   return (
+     <GradientScreen>
+       <ScreenHeader title="لوحة تحكم المطور" subtitle={profile?.email ?? ''} />
+@@ -101,6 +97,13 @@ export default function DeveloperHome() {
+           iconColor={colors.cyan}
+           onPress={() => router.push('/developer/centers')}
+         />
++        <ListItem
++          title="آخر زيارة لأصحاب السناتر"
++          subtitle={lastOwner ? `${lastOwner.owner_name} — ${lastOwner.center_name} — ${lastOwner.last_seen ? formatDate(lastOwner.last_seen) : 'لم يفتح النسخة المحدثة بعد'}` : 'سجل حضور الحساب وليس عنوان IP'}
++          icon="time"
++          iconColor={colors.info}
++          onPress={() => router.push('/developer/owner-presence')}
++        />
+         <ListItem
+           title="اشتراكات السناتر"
+           subtitle="باقات احترافية + اعتماد طلبات الترقية"
+@@ -131,8 +134,6 @@ export default function DeveloperHome() {
+           onPress={() => router.push('/developer/broadcast')}
+         />
+ 
+-        <SectionTitle title="حسابك" />
+-        <ListItem title="تسجيل خروج المطور" icon="log-out" iconColor={colors.danger} onPress={confirmSignOut} />
+       </KeyboardScreen>
+     </GradientScreen>
+   );
+diff --git a/app/developer/support.tsx b/app/developer/support.tsx
+index 32be65953c176927ae8cd85dd13ce42ae23c372b..4fed36e897d4bffc4081385d6a5497dee523c8c4 100644
+--- a/app/developer/support.tsx
++++ b/app/developer/support.tsx
+@@ -10,7 +10,7 @@ import { Alert, KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleShee
+ import { AppButton, AppInput, Card, EmptyState, LoadingView, SectionTitle } from '../../src/components/controls';
+ import { BackHeader, GradientScreen, ScreenHeader } from '../../src/components/layout';
+ import { DeveloperGate } from '../../src/components/DeveloperGate';
+-import { devFetchSupportMessages, devSendSupportMessage } from '../../src/lib/api';
++import { devFetchSupportMessages, devSendSupportMessage, markMySupportMessagesRead } from '../../src/lib/api';
+ import { useSession } from '../../src/lib/session';
+ import { getSupabase } from '../../src/lib/supabase';
+ import type { SupportMessage } from '../../src/lib/types';
+@@ -69,6 +69,7 @@ export default function DeveloperSupportScreen() {
+ 
+   const thread = threads.find((t) => t.centerId === openCenter) ?? null;
+ 
++  useEffect(() => { if (openCenter) void markMySupportMessagesRead(openCenter).catch(() => {}); }, [openCenter]);
+   useEffect(() => {
+     const t = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: false }), 120);
+     return () => clearTimeout(t);
+diff --git a/scripts/audit-app.mjs b/scripts/audit-app.mjs
+index 13c15714c461f368db6645298d16637de6dc931f..36100138f9706afc72d65afabafe646444beae71 100644
+--- a/scripts/audit-app.mjs
++++ b/scripts/audit-app.mjs
+@@ -156,11 +156,16 @@ check('تكامل واتساب (مكتبة + شاشة + أزرار الملف)',
+     && readFileSync(join(root, 'app/(admin)/student/[id].tsx'), 'utf8').includes('sendGuardianReport');
+ })());
+ check('تواصل المطور واتساب مع السناتر', readFileSync(join(root, 'app/developer/centers.tsx'), 'utf8').includes('openWhatsApp'));
+-check('بث المطور (أهداف + تتبع)', (() => {
++check('بث المطور (جمهور شامل + ظهور + بلا تكرار)', (() => {
+   const code = readFileSync(join(root, 'app/developer/broadcast.tsx'), 'utf8');
+-  return code.includes('all_owners') && code.includes('one_center') && code.includes('المطور:');
++  return ['all_owners_staff', 'all_owners_students', 'all_project', 'owners_students', 'urgent', 'message'].every((value) => code.includes(value))
++    && code.includes('developerBroadcastNotification');
++})());
++check('مركز التواصل العلوي وصندوق المطور الآمن', (() => {
++  const header = readFileSync(join(root, 'src/components/CommunicationHeader.tsx'), 'utf8');
++  const notices = readFileSync(join(root, 'app/(admin)/dev-notices.tsx'), 'utf8');
++  return header.includes('fetchMyCommunicationSummary') && header.includes('urgent') && notices.includes('markDeveloperNotificationRead');
+ })());
+-check('صندوق أصحاب السنتر', readFileSync(join(root, 'app/(admin)/dev-notices.tsx'), 'utf8').includes('markOwnerNoticeRead'));
+ check('تسجيل رمز الدفع عند الدخول', readFileSync(join(root, 'src/lib/session.tsx'), 'utf8').includes('registerPushToken'));
+ check('العامل يدعم التذكير المجدول والفوري', (() => {
+   const code = readFileSync(join(root, 'cloudflare/worker.js'), 'utf8');
+@@ -222,7 +227,10 @@ check('اللوحة تخفي الاشتراك والإجراءات عن المد
+   return code.includes('!isTeacher && subscription') && code.includes("label=\"طالب جديد\"");
+ })());
+ check('ملف الطالب: القوائم للمالك فقط', readFileSync(join(root, 'app/(admin)/student/[id].tsx'), 'utf8').includes('isOwner(profile)'));
+-check('إشعارات المطور محجوبة عن المدرس', readFileSync(join(root, 'app/(admin)/dev-notices.tsx'), 'utf8').includes('NoAccess'));
++check('إشعارات المطور مقيدة بالمالك أو الموظف النشط', (() => {
++  const code = readFileSync(join(root, 'app/(admin)/dev-notices.tsx'), 'utf8');
++  return code.includes('isOwner(profile)') && code.includes('isStaff(profile)') && code.includes('NoAccess');
++})());
+ check('أدوار الفريق معممة (مدير/سكرتير)', (() => {
+   const staff = readFileSync(join(root, 'src/lib/rbac.ts'), 'utf8');
+   return staff.includes('STAFF_ROLES') && staff.includes('manager') && staff.includes('isOwner')
+@@ -339,11 +347,11 @@ check('تبديل الوضع في صفحة حول التطبيق', readFileSync(
+ check('app.json يدعم الوضعين (automatic)', JSON.parse(readFileSync(join(root, 'app.json'), 'utf8')).expo.userInterfaceStyle === 'automatic');
+ 
+ console.log('\n━━ فحص الكود: تحسينات هذه الجلسة ━');
+-check('تجميع البثوث في مكتبة قابلة للاختبار', (() => {
+-  const lib = readFileSync(join(root, 'src/lib/broadcast.ts'), 'utf8');
++check('بث المطور خادمي موحد بلا تكرار محلي', (() => {
+   const ui = readFileSync(join(root, 'app/developer/broadcast.tsx'), 'utf8');
+-  return lib.includes('groupBroadcasts') && ui.includes("from '../../src/lib/broadcast'")
+-    && ui.includes("like('title', 'المطور: %')");
++  const api = readFileSync(join(root, 'src/lib/api.ts'), 'utf8');
++  return ui.includes('developerBroadcastNotification') && !ui.includes("from '../../src/lib/broadcast'")
++    && api.includes("rpc('developer_broadcast_notification'");
+ })());
+ check('النوافذ المنبثقة الحديثة (DetailSheet) مستخدمة في الإعلانات', (() => {
+   const sheet = readFileSync(join(root, 'src/components/DetailSheet.tsx'), 'utf8');
+diff --git a/scripts/audit-rpc.mjs b/scripts/audit-rpc.mjs
+index 65a86deefb51294db740852ed3479bb8e6131cff..cadafba7c5f7025da19ff742ef7df7cc35d5d4b2 100644
+--- a/scripts/audit-rpc.mjs
++++ b/scripts/audit-rpc.mjs
+@@ -1,19 +1,18 @@
+ #!/usr/bin/env node
+ // ============================================================================
+-// تدقيق تطابق استدعاءات RPC في التطبيق مع تعريفاتها في مخطط القاعدة:
+-// يستخرج أسماء الدوال ووسائط p_* من src/lib/api.ts ويتحقق أن كل دالة
+-// معرّفة في supabase/android_multitenant_schema.sql بنفس الوسائط.
+-// يكشف كسر التوافق (مثل مناداة وسيط غير موجود في القاعدة المنشورة).
+-// التشغيل: node scripts/audit-rpc.mjs
++// تدقيق تطابق استدعاءات RPC مع المخطط وكل migrations اللاحقة.
++// قبول overload صحيح فقط إن احتوى التعريف على كل وسائط الاستدعاء من التطبيق.
+ // ============================================================================
+ 
+-import { readFileSync } from 'node:fs';
++import { readFileSync, readdirSync } from 'node:fs';
+ import { dirname, join } from 'node:path';
+ import { fileURLToPath } from 'node:url';
+ 
+ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+ const api = readFileSync(join(root, 'src/lib/api.ts'), 'utf8');
+-const sql = readFileSync(join(root, 'supabase/android_multitenant_schema.sql'), 'utf8');
++const migrationDir = join(root, 'supabase');
++const sql = readdirSync(migrationDir).filter((file) => file.endsWith('.sql')).sort()
++  .map((file) => `\n-- ${file}\n${readFileSync(join(migrationDir, file), 'utf8')}`).join('\n');
+ 
+ let passed = 0; let failed = 0;
+ function check(name, cond, hint = '') {
+@@ -21,28 +20,22 @@ function check(name, cond, hint = '') {
+   else { failed++; console.log(`  ❌ ${name}${hint ? ` — ${hint}` : ''}`); }
+ }
+ 
+-console.log('\n━━ تطابق RPC: التطبيق ← القاعدة ━');
+-// sb.rpc('name', { p_a, p_b }) — نلتقط الاسم ومفاتيح الكائن
++console.log('\n━━ تطابق RPC: التطبيق ← القاعدة والمigrations ━');
+ const callRe = /\.rpc\(\s*'([a-z_]+)'\s*(,\s*\{([\s\S]*?)\})?\)/g;
+-let m;
++let match;
+ const seen = new Set();
+-while ((m = callRe.exec(api)) !== null) {
+-  const fn = m[1];
++while ((match = callRe.exec(api)) !== null) {
++  const fn = match[1];
+   if (seen.has(fn)) continue;
+   seen.add(fn);
+-  const argBlock = m[3] ?? '';
+-  const args = [...argBlock.matchAll(/p_[a-z_0-9]+/g)].map((x) => x[0]);
+-  const uniqArgs = [...new Set(args)];
+-  // تعريف الدالة في المخطط (آخر تعريف هو الفعّال مع OR REPLACE/DROP)
+-  // ملاحظة: [^)]* حتى لا تمتد المطابقة لسطور GRANT التي تليها TO لا RETURNS
++  const argBlock = match[3] ?? '';
++  const args = [...new Set([...argBlock.matchAll(/p_[a-z_0-9]+/g)].map((item) => item[0]))];
+   const defRe = new RegExp(`FUNCTION public\\.${fn}\\s*\\(([^)]*)\\)\\s*(RETURNS|LANGUAGE)`, 'g');
+-  let dm; let lastParams = null;
+-  while ((dm = defRe.exec(sql)) !== null) lastParams = dm[1];
+-  check(`الدالة ${fn} معرّفة في المخطط`, lastParams !== null, 'شغّل/حدّث ملف SQL');
+-  if (lastParams === null) continue;
+-  for (const a of uniqArgs) {
+-    check(`  ${fn}: الوسيط ${a} موجود في التعريف`, lastParams.includes(a), 'القاعدة المنشورة أقدم من التطبيق — أعد تشغيل المخطط');
+-  }
++  const definitions = [...sql.matchAll(defRe)].map((definition) => definition[1]);
++  check(`الدالة ${fn} معرّفة في المخطط`, definitions.length > 0, 'شغّل migrations قاعدة البيانات بالترتيب');
++  if (definitions.length === 0) continue;
++  const compatible = definitions.some((params) => args.every((arg) => params.includes(arg)));
++  for (const arg of args) check(`  ${fn}: الوسيط ${arg} موجود في تعريف متوافق`, compatible, 'راجع migration أو اسم وسيط RPC');
+ }
+ 
+ console.log(`\n━━━ النتيجة: ${passed} ناجح / ${failed} فاشل ━━━\n`);
+diff --git a/scripts/test-fresh.mjs b/scripts/test-fresh.mjs
+index e5a274f18b09971d1cae1ba58249fba17bb436fd..cec9b2d08a6bc40d76fb9389ab67b70dad6cab01 100644
+--- a/scripts/test-fresh.mjs
++++ b/scripts/test-fresh.mjs
+@@ -180,7 +180,9 @@ console.log('\n━━ بوابات الشاشات: كل شاشة تحمي نفس
+     apiCode.includes('fetchSupportMessages(centerId') && apiCode.includes('sendSupportMessage(centerId')
+     && apiCode.includes('devFetchSupportMessages') && apiCode.includes('devSendSupportMessage(centerId'));
+   ok('الحارس يسمح بشاشة الدعم', readFileSync(join(root, 'app/_layout.tsx'), 'utf8').includes("'support'"));
+-  ok('قائمة المزيد فيها الدعم الفني', readFileSync(join(root, 'app/(admin)/(tabs)/more.tsx'), 'utf8').includes('الدعم الفني'));
++  const moreCode = readFileSync(join(root, 'app/(admin)/(tabs)/more.tsx'), 'utf8');
++  const communicationHeader = readFileSync(join(root, 'src/components/CommunicationHeader.tsx'), 'utf8');
++  ok('الرسائل خارج قائمة المزيد وتظهر في الشريط العلوي', !moreCode.includes('الدعم الفني') && communicationHeader.includes('الرسائل'));
+   ok('لوحة المطور فيها الدعم الفني', readFileSync(join(root, 'app/developer/index.tsx'), 'utf8').includes('/developer/support'));
+ 
+   // التقارير: أربعة تبويبات + تقرير طالب بأنواعه
+@@ -196,11 +198,13 @@ console.log('\n━━ بوابات الشاشات: كل شاشة تحمي نفس
+   ok('الطلاب: بطاقة بحرف الاسم الأول', studentsTab.includes('avatar'));
+ 
+   // شاشات المالك فقط
+-  for (const route of ['teachers', 'subscription', 'activity', 'admin-settings', 'dev-notices']) {
++  for (const route of ['teachers', 'subscription', 'activity', 'admin-settings']) {
+     const code = readScreen(route);
+     ok(`شاشة ${route} للمالك فقط (isOwner + NoAccess)`,
+       !!code && code.includes('isOwner') && code.includes('NoAccess'));
+   }
++  const developerNotices = readScreen('dev-notices');
++  ok('صندوق المطور متاح للمالك والموظف النشط فقط', !!developerNotices && developerNotices.includes('isOwner') && developerNotices.includes('isStaff') && developerNotices.includes('NoAccess'));
+ }
+ 
+ // ═══ د) الوضع الفاتح/الداكن — سلوك حقيقي للوحات الحية ═══
+diff --git a/src/lib/api.ts b/src/lib/api.ts
+index e35479694d41129cca465248a5e9d9badae45ca4..08b5b2e3e7ba75677b440cdb25470df67785c329 100644
+--- a/src/lib/api.ts
++++ b/src/lib/api.ts
+@@ -4,13 +4,14 @@
+ // ============================================================
+ 
+ import { getSupabase } from './supabase';
++import { notifyCommunicationChanged } from './communication';
+ import { nowIso, todayIso, uuid } from './utils';
+ import type {
+   Announcement, AppExam, AppInquiry, AppNotification, AppSurvey, AppSurveyResponse, Attendance, AttendanceStatus,
+   BillingType, Center, CenterLookup, CenterSettings, Due, ExamAttempt, FiscalYear, Grade, StaffInvite,
+   ExamAnswer, ExamQuestion, ExamQuestionType, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
+   PublishedExam, SessionRecord, Student, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
+-  DeveloperBroadcastChannel, CenterBroadcastDelivery, DeveloperBroadcastResult,
++  DeveloperBroadcastChannel, CenterBroadcastDelivery, DeveloperBroadcastPresentation, DeveloperBroadcastResult, CommunicationSummary,
+ } from './types';
+ 
+ // ------------------------------------------------------------
+@@ -1242,6 +1243,7 @@ export async function developerBroadcastNotification(input: {
+   body: string;
+   centerId?: string | null;
+   centerDelivery?: CenterBroadcastDelivery | null;
++  presentation?: DeveloperBroadcastPresentation;
+ }): Promise<DeveloperBroadcastResult> {
+   const { data, error } = await getSupabase().rpc('developer_broadcast_notification', {
+     p_channel: input.channel,
+@@ -1249,6 +1251,7 @@ export async function developerBroadcastNotification(input: {
+     p_body: input.body.trim(),
+     p_center: input.centerId || null,
+     p_center_delivery: input.centerDelivery || null,
++    p_presentation: input.presentation ?? 'notification',
+   });
+   if (error) throw error;
+   return data as DeveloperBroadcastResult;
+@@ -1262,8 +1265,46 @@ export async function fetchMyDeveloperNotifications(): Promise<MyNotification[]>
+ }
+ 
+ export async function markDeveloperNotificationRead(notificationId: string): Promise<void> {
+-  const { error } = await getSupabase().rpc('mark_developer_notification_read', { p_notification: notificationId });
++  const { error } = await getSupabase().rpc('mark_my_communication_notification_read', { p_notification: notificationId });
+   if (error) throw error;
++  notifyCommunicationChanged();
++}
++
++export async function fetchMyCommunicationSummary(): Promise<CommunicationSummary> {
++  const { data, error } = await getSupabase().rpc('get_my_communication_summary');
++  if (error) throw error;
++  const raw = (data ?? {}) as Partial<CommunicationSummary>;
++  return {
++    notifications: { unread: Number(raw.notifications?.unread ?? 0), items: Array.isArray(raw.notifications?.items) ? raw.notifications.items : [] },
++    messages: { unread: Number(raw.messages?.unread ?? 0), items: Array.isArray(raw.messages?.items) ? raw.messages.items : [] },
++  };
++}
++
++export async function markMyCommunicationNotificationRead(notificationId: string): Promise<void> {
++  const { error } = await getSupabase().rpc('mark_my_communication_notification_read', { p_notification: notificationId });
++  if (error) throw error;
++  notifyCommunicationChanged();
++}
++
++export async function markMySupportMessagesRead(centerId?: string | null): Promise<void> {
++  const { error } = await getSupabase().rpc('mark_my_support_messages_read', { p_center: centerId ?? null });
++  if (error) throw error;
++  notifyCommunicationChanged();
++}
++
++export async function touchMyAccountPresence(deviceId: string, platform: string): Promise<void> {
++  const { error } = await getSupabase().rpc('touch_my_account_presence', { p_device_id: deviceId, p_platform: platform });
++  if (error) throw error;
++}
++
++export interface CenterOwnerPresence {
++  account_id: string; center_id: string; center_name: string; center_code: string;
++  owner_name: string; owner_email: string | null; last_seen: string | null; platform: string | null;
++}
++export async function devListCenterOwnerPresence(): Promise<CenterOwnerPresence[]> {
++  const { data, error } = await getSupabase().rpc('dev_list_center_owner_presence');
++  if (error) throw error;
++  return (Array.isArray(data) ? data : []) as CenterOwnerPresence[];
+ }
+ 
+ export async function fetchNotifications(centerId: string): Promise<AppNotification[]> {
+@@ -1398,6 +1439,7 @@ export async function markNotificationRead(centerId: string, notificationId: str
+     id: uuid(), center_id: centerId, notification_id: notificationId, student_id: studentId,
+   });
+   if (error && !String((error as { message?: string }).message ?? '').includes('duplicate key')) throw error;
++  notifyCommunicationChanged();
+ }
+ 
+ // ------------------------------------------------------------
+diff --git a/src/lib/session.tsx b/src/lib/session.tsx
+index dbd87738ee3e1994b09586f06fe20e7d4fc84ee0..e55e34b6518cd0590552eb75b3fd3d20cb19751c 100644
+--- a/src/lib/session.tsx
++++ b/src/lib/session.tsx
+@@ -6,6 +6,7 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useS
+ import type { Session } from '@supabase/supabase-js';
+ import { getSupabase, initSupabase, isSupabaseReady } from './supabase';
+ import { registerPushToken } from './push';
++import { touchCurrentAccountPresence } from './presence';
+ import type { MySubscription, Profile, Role } from './types';
+ 
+ interface SessionState {
+@@ -45,6 +46,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
+       if (error) throw error;
+       setProfile((prof as Profile) ?? null);
+       if (prof) {
++        void touchCurrentAccountPresence();
+         const { data: sub } = await sb.rpc('get_my_subscription');
+         setSubscription((sub as MySubscription) ?? null);
+         void registerPushToken();
+@@ -63,6 +65,7 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
+           .maybeSingle();
+         setProfile((prof as Profile) ?? null);
+         if (prof) {
++          void touchCurrentAccountPresence();
+           const { data: sub } = await sb.rpc('get_my_subscription');
+           setSubscription((sub as MySubscription) ?? null);
+         } else {
+@@ -112,6 +115,14 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
+     await loadProfile(data.session ?? null);
+   }, [loadProfile]);
+ 
++  // تجديد آخر ظهور كل دقيقة، وتقوم RPC بالخنق الخادمي حتى لا يزيد الحمل.
++  useEffect(() => {
++    if (!session || !configured) return;
++    void touchCurrentAccountPresence();
++    const timer = setInterval(() => { void touchCurrentAccountPresence(); }, 60000);
++    return () => clearInterval(timer);
++  }, [session, configured]);
++
+   const signOut = useCallback(async () => {
+     if (isSupabaseReady()) {
+       try { await getSupabase().auth.signOut(); } catch { /* تجاهل */ }
+diff --git a/src/lib/types.ts b/src/lib/types.ts
+index cb6c54bbdb79320951f22d2417f4e7680f08cc75..eb3dc9f2bac9d80ac78762fa0eb6923c1430ca29 100644
+--- a/src/lib/types.ts
++++ b/src/lib/types.ts
+@@ -340,12 +340,16 @@ export interface AppSurveyResponse {
+ 
+ export type NotificationAudience = 'all' | 'grade' | 'group' | 'student' | 'owners' | 'staff';
+ 
+-/** قنوات بث المطور الخمس، متطابقة مع الويب وموثقة خادمياً عبر RPC. */
+-export type DeveloperBroadcastChannel = 'center' | 'all_owners' | 'all_owners_students' | 'all_students' | 'staff';
+-export type CenterBroadcastDelivery = 'owners' | 'owners_students';
++export type DeveloperBroadcastPresentation = 'notification' | 'message' | 'urgent';
++/** قنوات المطور، وتشمل كل حسابات السناتر وخيارات الجمهور المتقدمة. */
++export type DeveloperBroadcastChannel = 'center' | 'all_owners' | 'all_owners_staff' | 'all_owners_students' | 'all_students' | 'staff' | 'all_project';
++/** مستلمو السنتر المحدد؛ لا يتلقى الحساب أكثر من صف واحد من البث. */
++export type CenterBroadcastDelivery = 'owners' | 'owners_staff' | 'owners_students' | 'owners_students_staff' | 'students' | 'staff' | 'everyone';
+ 
+ export interface DeveloperBroadcastResult {
+   channel: DeveloperBroadcastChannel;
++  presentation?: DeveloperBroadcastPresentation;
++  broadcast_id?: string;
+   centers: number;
+   notification_rows: number;
+   recipient_accounts: number;
+@@ -366,9 +370,22 @@ export interface MyNotification {
+   title: string;
+   body: string;
+   created_at: string;
++  presentation?: DeveloperBroadcastPresentation;
+   is_read: boolean;
+ }
+ 
++export interface CommunicationItem {
++  id: string;
++  title: string;
++  body: string;
++  created_at: string;
++  presentation?: DeveloperBroadcastPresentation;
++  route: string;
++  kind: 'notification' | 'developer_message' | 'support_message';
++}
++export interface CommunicationBucket { unread: number; items: CommunicationItem[]; }
++export interface CommunicationSummary { notifications: CommunicationBucket; messages: CommunicationBucket; }
++
+ export interface CenterSettings {
+   whatsapp: string;
+   contact_email: string;

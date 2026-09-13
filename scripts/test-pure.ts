@@ -28,6 +28,11 @@ import {
 } from '../src/lib/utils';
 import { decodeCenterQr, decodeStudentQr, encodeCenterQr, encodeStudentQr, fnv1aHex, isQrFresh } from '../src/lib/qr';
 import { toWaNumber, waLink } from '../src/lib/whatsapp';
+import { shouldExposeStoredSession } from '../src/lib/auth/clientSession';
+import { operatingExpense, periodTotals, summarizeEmployeePayroll } from '../src/lib/accounting';
+import { paperSections } from '../src/lib/exam-egyptian';
+import { brandForCenter, documentFooterText, normalizeCenterPrintSettings, watermarkGridColumns, watermarkRepeatCount } from '../src/lib/printing';
+import { pdfDocumentTitle } from '../src/lib/report';
 
 function profile(role: Profile['role'], perms: Profile['perms'] = {}, active = true): Profile {
   return {
@@ -39,6 +44,8 @@ function profile(role: Profile['role'], perms: Profile['perms'] = {}, active = t
 
 assert.equal(normalizePhone('٠١٠ 123-٤٥٦٧٨'), '01012345678');
 assert.equal(normalizeCenterCode(' ab 12 '), 'AB12');
+assert.equal(pdfDocumentTitle('اختبار', 'الصف الأول', 'علوم', 'المدرس مستر أحمد'), 'اختبار - الصف الأول - علوم - المدرس مستر أحمد');
+assert.equal(pdfDocumentTitle('تقرير: مالي/شهري؟'), 'تقرير مالي شهري');
 assert.equal(isValidCenterCode('ABC123'), true);
 assert.equal(isValidCenterCode('AB'), false);
 assert.equal(isValidEmail('a@b.com'), true);
@@ -51,6 +58,9 @@ assert.equal(isValidHttpUrl('javascript:alert(1)'), false);
 assert.equal(isValidSupabaseUrl('https://abc.supabase.co'), true);
 assert.equal(arabicError(new Error('invalid_payment_amount')), 'أدخل مبلغ تحصيل صحيحاً أكبر من صفر');
 assert.equal(arabicError(new Error('due_not_found')), 'المستحق المحدد غير موجود أو لا تملك صلاحية تحصيله');
+assert.equal(arabicError(new Error('advance_exceeds_balance')), 'قيمة السلفة المسوّاة أكبر من رصيد سلف الموظف القائم');
+assert.match(arabicError(new Error('group_uses_attendance_dues')), /الحضور/);
+assert.match(arabicError(new Error('invalid_bulk_payment')), /الجماعي/);
 assert.deepEqual(dbConfigFromRemote({ database: { url: 'https://abc.supabase.co', anon_key: 'anon' } }), { url: 'https://abc.supabase.co', anonKey: 'anon' });
 
 assert.equal(arabicDay('sat'), 'السبت');
@@ -63,6 +73,25 @@ assert.equal(isManualExamType('essay'), true);
 assert.equal(examMarksTotal([{ marks: 2 }, { marks: 3 }]), 5);
 assert.equal(validateExamDraft([{ q: 'سؤال', type: 'mcq', choices: ['أ', 'ب', 'ج', 'د'], marks: 1 }]), null);
 assert.match(validateExamDraft([{ q: '', type: 'mcq', choices: ['أ', 'ب', 'ج', 'د'], marks: 1 }]) ?? '', /نص السؤال/);
+assert.match(validateExamDraft([{ q: 'صحح العبارة', type: 'correct', choices: [], marks: 1 }]) ?? '', /تحتها خط/);
+assert.equal(validateExamDraft([{ q: 'صحح العبارة', type: 'correct', choices: [], marks: 1, underlined: { start: 2, count: 1 } }]), null);
+assert.deepEqual(paperSections([
+  { type: 'mcq', q: 'أ', choices: [], marks: 1, sectionId: 'first' },
+  { type: 'mcq', q: 'ب', choices: [], marks: 1, sectionId: 'first' },
+  { type: 'mcq', q: 'ج', choices: [], marks: 1, sectionId: 'second' },
+]).map((section) => [section.sectionId, section.items.length, section.marks]), [['first', 2, 2], ['second', 1, 1]]);
+const printSettings = normalizeCenterPrintSettings({ watermark_opacity: 2, logo_size: 300, logo_position: 'bad' as any, watermark_image: 'javascript:alert(1)' });
+assert.equal(printSettings.watermark_opacity, 0.55);
+assert.equal(printSettings.logo_size, 110);
+assert.equal(printSettings.logo_position, 'top_right');
+assert.equal(printSettings.watermark_image, '');
+assert.equal(printSettings.watermark_pattern, 'single');
+assert.equal(printSettings.watermark_layer, 'front');
+const tiledBrand = brandForCenter('سنتر النجاح', { watermark_pattern: 'staggered', watermark_repeat_count: 12, footer_show_center_name: false, footer_address: 'طلخا', footer_show_address: true });
+assert.equal(watermarkRepeatCount(tiledBrand), 12);
+assert.equal(watermarkGridColumns(tiledBrand), 5);
+assert.equal(documentFooterText(tiledBrand), 'طلخا');
+assert.equal(brandForCenter('سنتر النجاح', { watermark_text: '' }).watermark_text, '');
 assert.deepEqual(seededShuffle(5, 'abc').sort(), [0, 1, 2, 3, 4]);
 assert.equal(findGroupConflicts([
   { id: '1', name: 'أ', days: ['sat'], start_time: '09:00', end_time: '10:00' },
@@ -96,5 +125,29 @@ assert.equal(fnv1aHex('abc').length, 8);
 
 assert.equal(toWaNumber('01012345678'), '201012345678');
 assert.equal(waLink('01012345678', 'مرحبا')?.startsWith('https://wa.me/201012345678?text='), true);
+
+const authNow = 1_700_000_000_000;
+const accessOnlySession = (expiresAt: number) => JSON.stringify({
+  access_token: 'access-token', refresh_token: '', expires_at: expiresAt,
+});
+assert.equal(shouldExposeStoredSession(accessOnlySession(Math.floor(authNow / 1000) + 5 * 60), authNow), true);
+assert.equal(shouldExposeStoredSession(accessOnlySession(Math.floor(authNow / 1000) + 60), authNow), false);
+assert.equal(shouldExposeStoredSession('{bad json', authNow), false);
+assert.equal(shouldExposeStoredSession(JSON.stringify({ refresh_token: 'legacy-refresh-token' }), authNow), true);
+
+// المحاسبة: السلفة حركة نقدية وذمة للموظف، وليست تكلفة إضافية بجانب الراتب.
+const accountingRows = [
+  { id: 'advance', kind: 'expense' as const, entry_type: 'advance' as const, amount: 200, employee_id: 'teacher-1', affects_profit: false },
+  { id: 'salary', kind: 'expense' as const, entry_type: 'salary' as const, amount: 800, gross_amount: 1000, bonus_amount: 50, advance_applied: 200, deduction: 50, employee_id: 'teacher-1', affects_profit: true },
+  { id: 'income', kind: 'income' as const, entry_type: 'general' as const, amount: 2000, affects_profit: true },
+];
+assert.equal(operatingExpense(accountingRows[0]), 0);
+assert.equal(operatingExpense(accountingRows[1]), 1000);
+assert.deepEqual(periodTotals(accountingRows), { income: 2000, operatingCosts: 1000, netProfit: 1000, cashIncome: 2000, cashOut: 1000, cashNet: 1000, advances: 200 });
+assert.deepEqual(summarizeEmployeePayroll(accountingRows, 'teacher-1'), {
+  employeeId: 'teacher-1', baseSalary: 1000, bonuses: 50, commissions: 0,
+  advancesIssued: 200, advancesApplied: 200, advancesOutstanding: 0,
+  deductions: 50, cashPaid: 800, netPayroll: 800,
+});
 
 console.log('✅ pure logic tests passed');

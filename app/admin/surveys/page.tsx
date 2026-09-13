@@ -1,15 +1,16 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader, Select, formatStatus } from '@/components/ui';
 import { Modal } from '@/components/modal';
+import { SurveyResultsDashboard } from '@/components/survey/results-dashboard';
 import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
-import { deleteSurvey, fetchGrades, fetchGroups, fetchStudents, fetchSurveyResponses, fetchSurveys, toggleSurvey, upsertSurvey } from '@/lib/api';
+import { deleteSurvey, fetchCenterStudentGroups, fetchGrades, fetchGroups, fetchStudents, fetchSurveyResponseCounts, fetchSurveyResponses, fetchSurveys, toggleSurvey, upsertSurvey } from '@/lib/api';
 import { can } from '@/lib/rbac';
-import { audienceLabel, deadlineLabel, nextVersionAfterEdit, QUESTION_TYPES, QUESTION_TYPE_LABELS, surveyCsv, surveyStats } from '@/lib/survey';
+import { audienceLabel, deadlineLabel, nextVersionAfterEdit, QUESTION_TYPES, QUESTION_TYPE_LABELS, surveyCsv } from '@/lib/survey';
 import type { AppSurvey, AppSurveyResponse, Grade, Group, Student, SurveyAudience, SurveyQuestion, SurveyQuestionType } from '@/lib/types';
-import { formatDate, uuid } from '@/lib/utils';
+import { uuid } from '@/lib/utils';
 
 type QDraft = { key: string; type: SurveyQuestionType; title: string; required: boolean; options: string[]; maxRating: number; placeholder: string };
 type FormState = {
@@ -34,23 +35,29 @@ export default function AdminSurveysPage() {
   const centerId = profile?.center_id;
   const [rows, setRows] = useState<AppSurvey[]>([]);
   const [responses, setResponses] = useState<AppSurveyResponse[]>([]);
+  const [responseCounts, setResponseCounts] = useState<Record<string, number>>({});
+  const [studentGroups, setStudentGroups] = useState<Array<{ student_id: string; group_id: string }>>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [grades, setGrades] = useState<Grade[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [selected, setSelected] = useState<AppSurvey | null>(null);
+  const [resultsOpen, setResultsOpen] = useState(false);
+  const [resultsLoading, setResultsLoading] = useState(false);
   const [form, setForm] = useState<FormState>(initialForm);
   const [open, setOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
-  const studentName = useMemo(() => new Map(students.map((s) => [s.id, s.name])), [students]);
 
   const load = async () => {
     if (!centerId) return;
     setError(null);
     try {
-      const [surveys, st, gr, gp] = await Promise.all([fetchSurveys(centerId), fetchStudents(centerId), fetchGrades(centerId), fetchGroups(centerId)]);
-      setRows(surveys); setStudents(st); setGrades(gr); setGroups(gp);
+      const [surveys, st, gr, gp, counts, memberships] = await Promise.all([
+        fetchSurveys(centerId), fetchStudents(centerId), fetchGrades(centerId), fetchGroups(centerId),
+        fetchSurveyResponseCounts(centerId), fetchCenterStudentGroups(centerId),
+      ]);
+      setRows(surveys); setStudents(st); setGrades(gr); setGroups(gp); setResponseCounts(counts); setStudentGroups(memberships);
     } catch (err) { setError(err); }
   };
   useEffect(() => { void load(); }, [centerId]);
@@ -104,8 +111,13 @@ export default function AdminSurveysPage() {
       prevQuestions: s.questions ?? [],
     });
     setDirty(false); setError(null); setOpen(true);
-    setSelected(s);
-    try { setResponses(await fetchSurveyResponses(s.id)); } catch (err) { setError(err); }
+  };
+
+  const openResults = async (survey: AppSurvey) => {
+    setSelected(survey); setResponses([]); setResultsLoading(true); setResultsOpen(true); setError(null);
+    try { setResponses(await fetchSurveyResponses(survey.id)); }
+    catch (err) { setError(err); }
+    finally { setResultsLoading(false); }
   };
 
   const submit = async (e: React.FormEvent) => {
@@ -123,14 +135,14 @@ export default function AdminSurveysPage() {
         is_active: form.is_active, version: nextVersionAfterEdit(form.id ? { version: form.version, questions: form.prevQuestions } : undefined, clean),
       });
       toast.success('تم حفظ الاستبيان', form.id ? 'تم تحديث الاستبيان.' : 'أصبح متاحاً للطلاب.');
-      setDirty(false); setOpen(false); setForm(initialForm); setSelected(null); setResponses([]); await load();
+      setDirty(false); setOpen(false); setForm(initialForm); await load();
     } catch (err) { setError(err); }
     finally { setBusy(false); }
   };
 
   const remove = async (id: string) => {
     if (!confirm('حذف الاستبيان وإجاباته؟')) return;
-    try { await deleteSurvey(id); await load(); toast.success('تم حذف الاستبيان'); if (selected?.id === id) { setSelected(null); setResponses([]); } } catch (err) { setError(err); }
+    try { await deleteSurvey(id); await load(); toast.success('تم حذف الاستبيان'); if (selected?.id === id) { setSelected(null); setResponses([]); setResultsOpen(false); } } catch (err) { setError(err); }
   };
 
   const exportCsv = (s: AppSurvey) => {
@@ -142,7 +154,12 @@ export default function AdminSurveysPage() {
     URL.revokeObjectURL(url);
   };
 
-  const stats = selected ? surveyStats(selected, responses) : [];
+  const targetCount = (survey: AppSurvey) => {
+    if (survey.audience === 'all') return students.length;
+    if (survey.audience === 'grade') return students.filter((student) => student.grade_id === survey.grade_id).length;
+    const targetGroups = new Set(survey.group_ids ?? []);
+    return students.filter((student) => targetGroups.has(student.group_id ?? '') || studentGroups.some((membership) => membership.student_id === student.id && targetGroups.has(membership.group_id))).length;
+  };
 
   return <>
     <PageHeader
@@ -151,56 +168,26 @@ export default function AdminSurveysPage() {
       actions={<Button type="button" onClick={openNew}>+ استبيان جديد</Button>}
     />
     <ErrorNotice error={error} />
-    <Card className="stack">
-      <div className="row-between"><h2 className="h3">الاستبيانات</h2><Badge tone="info">{rows.length}</Badge></div>
-      {rows.length === 0 ? <EmptyState title="لا توجد استبيانات" body="أنشئ استبياناً واختر نوع كل سؤال وجمهوره وموعده النهائي." /> : rows.map((s) => {
-        const st = formatStatus(s.is_active ? 'active' : 'suspended');
-        const open = !s.deadline || new Date(s.deadline).getTime() >= Date.now();
-        return <div key={s.id} className="card compact soft stack">
-          <div className="row-between"><strong>{s.title}</strong><Badge tone={st.tone}>{s.is_active ? 'نشط' : 'موقوف'}</Badge></div>
-          <p className="muted tiny">{s.questions.length} أسئلة · {audienceLabel(s, grades, groups)} · {deadlineLabel(s)}{!open && s.is_active ? ' (منتهي)' : ''} · {formatDate(s.created_at)}</p>
-          <div className="row">
-            <Button type="button" variant="secondary" onClick={() => void openEdit(s)}>النتائج/تعديل</Button>
-            <Button type="button" variant="secondary" onClick={async () => { await toggleSurvey(s.id, !s.is_active); await load(); toast.success(s.is_active ? 'تم إيقاف الاستبيان' : 'تم تفعيل الاستبيان'); }}>{s.is_active ? 'إيقاف' : 'تفعيل'}</Button>
-            <Button type="button" variant="danger" onClick={() => void remove(s.id)}>حذف</Button>
-          </div>
-        </div>;
-      })}
-    </Card>
+    <section className="survey-library">
+      <div className="survey-library-head"><div><h2 className="h2">مركز الاستبيانات</h2><p>تابع المشاركة والنتائج من القائمة مباشرة، ثم افتح التحليل الكامل بعلامة العين.</p></div><Badge tone="info">{rows.length} استبيان</Badge></div>
+      {rows.length === 0 ? <Card><EmptyState title="لا توجد استبيانات" body="أنشئ استبياناً واختر نوع كل سؤال وجمهوره وموعده النهائي." /></Card> : <div className="survey-library-grid">{rows.map((survey) => {
+        const status = formatStatus(survey.is_active ? 'active' : 'suspended');
+        const available = !survey.deadline || new Date(survey.deadline).getTime() >= Date.now();
+        const target = targetCount(survey);
+        const count = responseCounts[survey.id] ?? 0;
+        const rate = target ? Math.min(100, Math.round((count / target) * 100)) : 0;
+        return <article key={survey.id} className="survey-library-card">
+          <header><div className="survey-library-icon">▤</div><div className="survey-library-title"><h3>{survey.title}</h3><p>{survey.description || 'استبيان بدون وصف.'}</p></div><Badge tone={status.tone}>{survey.is_active ? available ? 'نشط' : 'انتهى الموعد' : 'موقوف'}</Badge></header>
+          <div className="survey-library-meta"><span>{survey.questions.length} أسئلة</span><span>{audienceLabel(survey, grades, groups)}</span><span>{deadlineLabel(survey)}</span></div>
+          <div className="survey-library-participation"><div className="row-between"><span>المشاركة</span><strong>{count}{target ? ` / ${target}` : ' رد'}</strong></div>{target ? <><div className="progress-track"><div className="progress-fill" style={{ width: `${rate}%` }} /></div><small>{rate}% من الطلاب المستهدفين</small></> : <small>لا يوجد جمهور محدد للحساب</small>}</div>
+          <footer><Button type="button" variant="secondary" className="survey-eye-button" title="عرض نتائج الاستبيان" aria-label={`عرض نتائج ${survey.title}`} onClick={() => void openResults(survey)}>👁 <span>النتائج</span></Button><Button type="button" variant="ghost" onClick={() => void openEdit(survey)}>تعديل</Button><Button type="button" variant="ghost" onClick={async () => { try { await toggleSurvey(survey.id, !survey.is_active); await load(); toast.success(survey.is_active ? 'تم إيقاف الاستبيان' : 'تم تفعيل الاستبيان'); } catch (err) { setError(err); } }}>{survey.is_active ? 'إيقاف' : 'تفعيل'}</Button><Button type="button" variant="danger" onClick={() => void remove(survey.id)}>حذف</Button></footer>
+        </article>;
+      })}</div>}
+    </section>
 
-    {selected ? (
-      <Card className="stack" style={{ marginTop: 18 }}>
-        <div className="row-between">
-          <h2 className="h3">نتائج: {selected.title}</h2>
-          <div className="row"><Badge tone="info">{responses.length} إجابة</Badge><Button type="button" variant="secondary" onClick={() => exportCsv(selected)}>تصدير CSV</Button></div>
-        </div>
-        {responses.length === 0 ? <EmptyState title="لا توجد إجابات" /> : (
-          <div className="stack" style={{ gap: 14 }}>
-            {stats.map((s) => (
-              <div key={s.question.id} className="card compact soft stack">
-                <div className="row-between"><strong>{s.question.title}</strong><span className="tiny muted">{QUESTION_TYPE_LABELS[s.question.type]} · أجاب {s.answered}</span></div>
-                {s.question.type === 'text'
-                  ? <div className="stack" style={{ gap: 4 }}>{s.texts.length === 0 ? <span className="muted tiny">لا إجابات</span> : s.texts.map((t, i) => <div key={i} className="notice">{t}</div>)}</div>
-                  : <div className="stack" style={{ gap: 4 }}>
-                      {s.counts.map((c) => <div key={c.label} className="row-between small"><span>{c.label}</span><span className="row" style={{ gap: 6 }}><div className="bar" style={{ width: Math.max(4, Math.round((c.count / Math.max(1, s.answered)) * 100)), backgroundColor: 'var(--accent)', height: 8, borderRadius: 4 }} /><b>{c.count}</b></span></div>)}
-                      {s.average !== null ? <span className="tiny muted">المتوسط: <b>{s.average} / {s.question.maxRating || 5}</b></span> : null}
-                    </div>}
-              </div>
-            ))}
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>الطالب</th>{selected.questions.map((q) => <th key={q.id}>{q.title}</th>)}<th>التاريخ</th></tr></thead>
-                <tbody>{responses.map((r) => (
-                  <tr key={r.id}><td>{selected.anonymous ? 'مجهول' : studentName.get(r.student_id) ?? r.student_id}</td>
-                  {selected.questions.map((q) => { const a = r.answers?.[q.id]; return <td key={q.id}>{a?.choice?.length ? a.choice.join(' • ') : a?.text?.trim() || (a?.rating ? `${a.rating}/${q.maxRating || 5}` : '—')}</td>; })}
-                  <td>{formatDate(r.created_at)}</td></tr>
-                ))}</tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </Card>
-    ) : null}
+    <Modal open={resultsOpen && !!selected} title="نتائج الاستبيان" subtitle={selected ? `${selected.questions.length} أسئلة · ${audienceLabel(selected, grades, groups)}` : ''} onClose={() => setResultsOpen(false)} wide footer={<Button type="button" onClick={() => setResultsOpen(false)}>إغلاق</Button>}>
+      {selected ? <SurveyResultsDashboard survey={selected} responses={responses} students={students} targetCount={targetCount(selected)} loading={resultsLoading} onExport={() => exportCsv(selected)} /> : null}
+    </Modal>
 
     <Modal
       open={open}

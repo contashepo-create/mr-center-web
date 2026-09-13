@@ -112,6 +112,8 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
       SELECT (enabled_features ->> 'accounting')::boolean
       FROM public.center_subscriptions
       WHERE center_id = p_center AND status = 'active'
+        AND starts_on <= CURRENT_DATE
+        AND ends_on >= CURRENT_DATE
       ORDER BY ends_on DESC NULLS LAST LIMIT 1
     ), false)
     OR EXISTS (
@@ -165,6 +167,11 @@ DECLARE v_role TEXT; v_center UUID; v_result JSONB;
 BEGIN
   SELECT role, center_id INTO v_role, v_center FROM public.profiles WHERE id = auth.uid();
   IF v_role NOT IN ('center_admin','super_admin') OR v_center IS NULL THEN RETURN '[]'::jsonb; END IF;
+  IF v_role = 'center_admin' AND NOT public.center_accounting_enabled(v_center) THEN
+    -- لا تُعرض أي بيانات مالية بعد الانتهاء، لكن لا نرفع HTTP 400 متوقعاً
+    -- من صفحات الإعدادات/التعريف التي قد تستدعي القائمة قبل بوابة الواجهة.
+    RETURN '[]'::jsonb;
+  END IF;
   SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.starts_on DESC), '[]'::jsonb) INTO v_result
   FROM (
     SELECT id, center_id, year_label, starts_on, ends_on, status,
@@ -235,7 +242,7 @@ BEGIN
   v_balance := v_year.opening_balance + v_income - v_expense;
   SELECT COALESCE(SUM(amount), 0) INTO v_pending FROM public.dues
    WHERE center_id = p_center AND status IN ('pending','partial')
-     AND make_date(year, month, 1) BETWEEN v_year.starts_on AND v_year.ends_on;
+     AND make_date(due_year, month, 1) BETWEEN v_year.starts_on AND v_year.ends_on;
 
   UPDATE public.center_fiscal_years
    SET status = 'closed', ends_on = v_year.ends_on,
@@ -262,25 +269,23 @@ END; $$;
 GRANT EXECUTE ON FUNCTION public.close_fiscal_year(UUID) TO authenticated;
 
 -- ----------------------------------------------------------------------------
--- ٥) العهدة: اعتماد تلقائي كأنها سليمة عندما تكون المحاسبة غير مفعلة للسنتر
---     (تسجيل الإيرادات يبقى سليماً في الخلفية دائماً عبر trigger الدفعات).
+-- ٥) العهدة: التحصيل والتسليم عمليتان تشغيليتان تستمران حتى عند انتهاء
+-- الاشتراك، لكن لا يجوز وصف عجز حقيقي بأنه «مطابق». تسوية العجز المالية نفسها
+-- تبقى داخل بوابة المحاسبة وتتاح فور التجديد مع الاحتفاظ بكل الفروق المسجلة.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.submit_staff_custody(p_staff UUID, p_date DATE, p_delivered NUMERIC, p_notes TEXT DEFAULT '')
 RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE cid UUID; expected NUMERIC; result UUID; v_status TEXT;
+  v_date DATE := COALESCE(p_date, CURRENT_DATE); v_delivered NUMERIC := COALESCE(p_delivered, -1);
 BEGIN
   SELECT center_id INTO cid FROM public.profiles WHERE id = auth.uid() AND role IN ('manager','secretary') AND is_active;
   IF cid IS NULL OR p_staff <> auth.uid() THEN RAISE EXCEPTION 'not_allowed'; END IF;
+  IF v_delivered < 0 THEN RAISE EXCEPTION 'invalid_custody_amount'; END IF;
   SELECT COALESCE(SUM(amount), 0) INTO expected FROM public.center_ledger
-   WHERE center_id = cid AND created_by = p_staff AND entry_type = 'payment_collection' AND occurred_on = p_date;
-  IF public.center_accounting_enabled(cid) THEN
-    v_status := CASE WHEN p_delivered = expected THEN 'matched' WHEN p_delivered < expected THEN 'shortage' ELSE 'surplus' END;
-  ELSE
-    -- الخدمة غير مفعلة: اعتماد تلقائي كأن العهدة سليمة حتى تبقى الحسابات نظيفة في الخلفية
-    v_status := 'matched';
-  END IF;
+   WHERE center_id = cid AND created_by = p_staff AND entry_type = 'payment_collection' AND occurred_on = v_date;
+  v_status := CASE WHEN v_delivered = expected THEN 'matched' WHEN v_delivered < expected THEN 'shortage' ELSE 'surplus' END;
   INSERT INTO public.staff_custody(center_id, staff_id, custody_date, expected_amount, delivered_amount, status, notes, submitted_at, submitted_by)
-  VALUES(cid, p_staff, p_date, expected, GREATEST(p_delivered, 0), v_status, COALESCE(p_notes, ''), now(), auth.uid())
+  VALUES(cid, p_staff, v_date, expected, v_delivered, v_status, COALESCE(p_notes, ''), now(), auth.uid())
   ON CONFLICT(center_id, staff_id, custody_date) DO UPDATE
    SET expected_amount = EXCLUDED.expected_amount, delivered_amount = EXCLUDED.delivered_amount,
        status = EXCLUDED.status, notes = EXCLUDED.notes, submitted_at = now(), submitted_by = auth.uid()

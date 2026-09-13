@@ -54,23 +54,25 @@ export function egyptMeta(type: ExamQuestionType): EgyptTypeMeta {
 /** قسم ورقي = مجموعة أسئلة متتالية من نفس النوع تحت عنوان واحد */
 export interface PaperSection {
   type: ExamQuestionType;
+  sectionId: string;
   header: string;
   meta: EgyptTypeMeta;
   items: ExamQuestion[];
   marks: number;
 }
 
-/** تجميع الأسئلة المتتالية من نفس النوع في أقسام ورقة الامتحان */
+/** يجمع السؤال الرئيسي وأسئلته الفرعية. تبقى الاختبارات القديمة مجمعة حسب النوع للتوافق. */
 export function paperSections(questions: ExamQuestion[]): PaperSection[] {
   const sections: PaperSection[] = [];
   for (const q of questions) {
     const meta = egyptMeta(q.type);
+    const sectionId = q.sectionId || `legacy-${q.type}`;
     const last = sections[sections.length - 1];
-    if (last && last.type === q.type) {
+    if (last && last.sectionId === sectionId) {
       last.items.push(q);
       last.marks += Number(q.marks) || 0;
     } else {
-      sections.push({ type: q.type, header: meta.header, meta, items: [q], marks: Number(q.marks) || 0 });
+      sections.push({ type: q.type, sectionId, header: meta.header, meta, items: [q], marks: Number(q.marks) || 0 });
     }
   }
   return sections;

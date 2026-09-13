@@ -3,9 +3,9 @@
 import type { Session } from '@supabase/supabase-js';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { getSupabase, initSupabase, isSupabaseReady } from '@/lib/supabase';
-import { fetchMyFeatures, type MyFeatures } from '@/lib/features';
-import { claimMySession, isMySessionCurrent } from '@/lib/sessionGuard';
-import { refreshAccessToken } from '@/lib/auth/clientSession';
+import { fetchMyFeatures, touchMyAccountPresence, type MyFeatures } from '@/lib/features';
+import { claimMySession, isMySessionCurrent, registerMyStudentDevice } from '@/lib/sessionGuard';
+import { clearLocalAccessSession, refreshAccessToken } from '@/lib/auth/clientSession';
 import { ACCESS_REFRESH_MARGIN_MS } from '@/lib/auth/constants';
 import type { MySubscription, Profile, Role } from '@/lib/types';
 
@@ -49,6 +49,11 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle();
       if (error) throw error;
       setProfile((prof as Profile) ?? null);
+      // الجلسة المستعادة لا تمر دائماً بحدث SIGNED_IN؛ سجّل جهاز الطالب
+      // دون إعادة مطالبة الجلسة حتى لا تستحوذ جلسة قديمة على جلسة أحدث.
+      if (prof?.role === 'student') void registerMyStudentDevice();
+      // حضور الحساب (ومن ضمنه صاحب السنتر) لا يسجل IP ولا يعرقل تحميل الجلسة.
+      if (prof) void touchMyAccountPresence().catch(() => {});
 
       if (prof) {
         const [sub, feat] = await Promise.all([
@@ -70,43 +75,77 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   // يقرأ الجلسة، وإن غابت (مثلاً مسح التخزين المحلي) يحاول استردادها
   // عبر كوكيز التجديد HttpOnly قبل اعتبار المستخدم غير مسجل.
+  // لا نسمح لأي خطأ في جلسة قديمة أن يمنع اكتمال شاشة التحميل.
   const loadInitialSession = useCallback(async (): Promise<Session | null> => {
-    const sb = getSupabase();
-    const { data } = await sb.auth.getSession();
-    if (data.session) return data.session;
-    const ok = await refreshAccessToken();
-    if (!ok) return null;
-    const again = await sb.auth.getSession();
-    return again.data.session ?? null;
+    const readSession = async (): Promise<Session | null> => {
+      try {
+        const { data, error } = await getSupabase().auth.getSession();
+        return error ? null : data.session ?? null;
+      } catch {
+        return null;
+      }
+    };
+
+    const current = await readSession();
+    if (current) return current;
+
+    const refreshed = await refreshAccessToken();
+    if (!refreshed) {
+      // الجلسة المحلية لا يمكن تجديدها؛ لا نتركها لتفشل في كل زيارة لاحقة.
+      clearLocalAccessSession();
+      return null;
+    }
+
+    const restored = await readSession();
+    if (!restored) clearLocalAccessSession();
+    return restored;
   }, []);
 
   const bootstrap = useCallback(async () => {
     setReady(false);
-    const status = await initSupabase();
-    setConfigured(status === 'ready');
-    if (status === 'ready') {
+    try {
+      const status = await initSupabase();
+      setConfigured(status === 'ready');
+      if (status !== 'ready') {
+        setSession(null);
+        await loadProfile(null);
+        return;
+      }
       const sess = await loadInitialSession();
       setSession(sess);
       await loadProfile(sess);
+    } catch {
+      setConfigured(false);
+      setSession(null);
+      await loadProfile(null);
+    } finally {
+      setReady(true);
     }
-    setReady(true);
   }, [loadProfile, loadInitialSession]);
 
   useEffect(() => {
     let unsubscribe: (() => void) | undefined;
     let cancelled = false;
 
-    (async () => {
-      const status = await initSupabase();
-      if (cancelled) return;
-      setConfigured(status === 'ready');
+    const initialise = async () => {
+      setReady(false);
+      try {
+        const status = await initSupabase();
+        if (cancelled) return;
+        setConfigured(status === 'ready');
 
-      if (status === 'ready') {
+        if (status !== 'ready') {
+          setSession(null);
+          await loadProfile(null);
+          return;
+        }
+
         const sb = getSupabase();
         const sess = await loadInitialSession();
         if (cancelled) return;
         setSession(sess);
         await loadProfile(sess);
+        if (cancelled) return;
 
         const { data: listener } = sb.auth.onAuthStateChange((_event, newSession) => {
           if (_event === 'SIGNED_IN') {
@@ -117,10 +156,17 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
           setTimeout(() => { void loadProfile(newSession); }, 0);
         });
         unsubscribe = () => listener.subscription.unsubscribe();
+      } catch {
+        // فشل شبكة/جلسة قديمة لا يجب أن يحبس الزائر في شاشة التحميل.
+        setConfigured(false);
+        setSession(null);
+        await loadProfile(null);
+      } finally {
+        if (!cancelled) setReady(true);
       }
+    };
 
-      if (!cancelled) setReady(true);
-    })();
+    void initialise();
 
     return () => {
       cancelled = true;
@@ -130,10 +176,10 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
   const refresh = useCallback(async () => {
     if (!isSupabaseReady()) return;
-    const { data } = await getSupabase().auth.getSession();
-    setSession(data.session ?? null);
-    await loadProfile(data.session ?? null);
-  }, [loadProfile]);
+    const sess = await loadInitialSession();
+    setSession(sess);
+    await loadProfile(sess);
+  }, [loadInitialSession, loadProfile]);
 
   const reinitConnection = useCallback(async (): Promise<'ready' | 'missing'> => {
     await bootstrap();
@@ -144,6 +190,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
     if (isSupabaseReady()) {
       try { await getSupabase().auth.signOut(); } catch { /* ignore */ }
     }
+    // حتى إذا كانت الجلسة منتهية ولا يستطيع SDK قراءتها، نمسح رمز الوصول.
+    clearLocalAccessSession();
     setSession(null);
     setProfile(null);
     setSubscription(null);
@@ -158,15 +206,19 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
 
     const check = async () => {
       if (cancelled) return;
-      try {
-        const { data } = await getSupabase().auth.getSession();
-        const sess = data.session;
-        if (sess && sess.expires_at && sess.expires_at * 1000 - Date.now() < ACCESS_REFRESH_MARGIN_MS) {
-          const ok = await refreshAccessToken();
-          if (ok) await refresh();
+      // لا نقرأ getSession هنا: قرب انتهاء الرمز يخفيه التخزين الهجين عن SDK
+      // كي لا يحاول استخدام refresh_token فارغ. نستند إلى حالة React الحالية.
+      if (session.expires_at && session.expires_at * 1000 - Date.now() < ACCESS_REFRESH_MARGIN_MS) {
+        const ok = await refreshAccessToken();
+        if (!ok) {
+          if (!cancelled) await signOut();
+          return;
         }
-      } catch { /* ignore */ }
+        if (!cancelled) await refresh();
+      }
       if (cancelled) return;
+      // الدالة خادمية throttled لدقيقة؛ نطلبها مع فحص الجلسة كي يبقى آخر ظهور دقيقاً.
+      void touchMyAccountPresence().catch(() => {});
       const current = await isMySessionCurrent();
       if (cancelled || current) return;
       // فقد هذا الجهاز جلسته: تسجيل خروج فوري

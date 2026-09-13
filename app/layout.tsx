@@ -11,6 +11,10 @@ export const metadata: Metadata = {
   title: 'Mr Center',
   description: 'منصة إدارة السناتر التعليمية — ويب وموبايل بحساب واحد وبيانات مشتركة.',
   applicationName: 'Mr Center',
+  icons: {
+    icon: '/favicon.ico',
+    shortcut: '/favicon.ico',
+  },
 };
 
 export const viewport: Viewport = {
@@ -18,7 +22,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   themeColor: [
     { media: '(prefers-color-scheme: light)', color: '#f5f7fb' },
-    { media: '(prefers-color-scheme: dark)', color: '#0a0f1c' },
+    { media: '(prefers-color-scheme: dark)', color: '#171c25' },
   ],
 };
 

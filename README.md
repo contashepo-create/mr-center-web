@@ -177,15 +177,28 @@ supabase/android_multitenant_schema.sql
 ```txt
 supabase/android_multitenant_schema.sql          # المخطط الأساسي الكامل (شامل تكافؤ المحاسبة/الدعوات/المدير)
 supabase/20260911_safe_production_migration.sql  # أعمدة الاشتراكات + دفتر الحسابات + المحصّل
+supabase/20260913_fiscal_runtime_repair.sql       # **ضروري للقواعد الحية القديمة**: توافق أعمدة السنة وإصلاح RPC السنوات قبل تشغيل بقية ترقيات المحاسبة
 supabase/20260912_fiscal_accounting.sql          # السنة المالية + بوابة المحاسبة المدفوعة + الاشتراكات + الزوار
 supabase/20260912_security.sql                   # تحصيل ذري من السباق + جلسة واحدة + منع الروبوتات
 supabase/20260912_fix_year_columns.sql           # أعمدة السنوات الصحيحة + ربط الحضور بالحصص + دالة التحصيل
 supabase/20260912_entitlement_enforcement.sql    # فرض حدود الاشتراكات خادمياً + تنبيهات التجاوز + عزل المدرسين
 supabase/20260912_fiscal_accounting_gate.sql     # قفل المحاسبة غير المفعّلة على مستوى RLS/RPC
+supabase/20260913_practical_accounting.sql        # صرف رواتب/سلف صحيحة + إيراد يدوي + صرف عمولات (لا تعد السلفة مصروفاً)
+supabase/20260913_accounting_operations.sql       # خصومات معلقة + صرف راتب ذري + تدفق العهدة والتحصيل
+supabase/20260913_monthly_payroll_periods.sql     # مسيرات مستقلة لكل شهر وعزل بنود الشهر
+supabase/20260913_settlement_traceability.sql     # تتبع تسوية السلف والخصومات عبر الأشهر
+supabase/20260913_student_collections.sql         # التحصيل المتقدم: رصيد مقدم + استحقاق بالحضور + كشف/تسوية حساب الطالب
+supabase/20260913_student_access_and_custody_resolution.sql # عزل أجهزة الطلاب وتسوية عجز العهدة
+supabase/20260913_custody_subscription_integrity.sql # حفظ فروق العهدة وسلامة التحصيل بعد انتهاء الخدمة
+supabase/20260913_accounting_subscription_validity.sql # بوابة المحاسبة بحسب فترة الاشتراك الفعلية
+supabase/20260913_developer_broadcast_channels.sql # قنوات بث المطور الخمس وصندوق رسائل آمن للأصحاب والموظفين
 supabase/20260912_exams_complaints.sql           # محاولات الاختبارات المتعددة + طرق عرض النتيجة + قسم الشكاوي
 supabase/20260912_survey_model.sql               # نموذج الاستبيان الكامل (أنواع أسئلة/جمهور/موعد/خصوصية)
 supabase/20260912_grade_order.sql                # ترتيب المراحل الدراسية يدوياً
 supabase/20260912_exam_ornaments_images.sql      # زخارف ورقة الاختبار + صور الأسئلة + إخفاء مفتاح التصحيح
+supabase/20260913_exam_workspace.sql              # مسار ورقي/إلكتروني + نطاق مجموعات + جدولة الإتاحة للاختبارات
+supabase/20260913_print_identity_and_exam_footer.sql # هوية الطباعة الموحدة وخاتمة ورقة الاختبار
+supabase/20260913_student_transfer_requests.sql   # طلب انتقال بمجموعتي المصدر/الوجهة + موافقة تنقل الطالب ذرياً
 ```
 
 ---

@@ -1,29 +1,23 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader, Select } from '@/components/ui';
+import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader, Select, Textarea } from '@/components/ui';
 import { Modal } from '@/components/modal';
+import { CustodyWorkspace } from '@/components/accounting/custody-workspace';
 import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
 import { closeFiscalYear, fetchMyFiscalYears, requestAccounting, type FiscalYear } from '@/lib/features';
 import { isOwner, roleLabel } from '@/lib/rbac';
 import { getSupabase } from '@/lib/supabase';
+import { LEDGER_ENTRY_LABEL, operatingExpense, periodTotals, summarizeEmployeePayroll, type AccountingLedgerRow, valueOf } from '@/lib/accounting';
 import type { Profile } from '@/lib/types';
 import { formatDate, formatMoney, todayIso } from '@/lib/utils';
-import { buildPayrollReportHtml, buildReportHtml, printReport } from '@/lib/report';
+import { buildReportHtml, printCenterReport } from '@/lib/report';
 
-type LedgerKind = 'income' | 'expense';
-type EntryType = 'general' | 'salary' | 'advance' | 'bonus' | 'rent' | 'utility' | 'purchase' | 'payment_collection';
-type Ledger = {
-  id: string;
+type Ledger = AccountingLedgerRow & {
   center_id: string;
-  kind: LedgerKind;
-  entry_type: EntryType;
   category: string;
   description: string;
-  amount: number;
-  deduction: number;
-  employee_id: string | null;
   occurred_on: string;
   period_month: number | null;
   period_year: number | null;
@@ -34,585 +28,473 @@ type Ledger = {
 };
 type Staff = Pick<Profile, 'id' | 'full_name' | 'role'>;
 type CommissionRule = { id: string; staff_id: string; rate: number; starts_on: string; ends_on: string | null; is_active: boolean };
-type Tab = 'ledger' | 'analysis' | 'staff' | 'commissions' | 'years' | 'reports';
+type StaffDeduction = { id: string; center_id: string; staff_id: string; amount: number | string; applied_amount: number | string; reason: string; notes: string; occurred_on: string; status: 'open' | 'partial' | 'settled'; created_at: string };
+type StaffAdvanceSettlement = { id: string; center_id: string; staff_id: string; advance_ledger_id: string; salary_ledger_id: string; amount: number | string; settled_on: string; period_month: number; period_year: number; created_at: string };
+type StaffDeductionSettlement = { id: string; center_id: string; staff_id: string; deduction_id: string; salary_ledger_id: string; amount: number | string; settled_on: string; period_month: number; period_year: number; created_at: string };
+type Tab = 'overview' | 'ledger' | 'payroll' | 'advances' | 'deductions' | 'commissions' | 'custody' | 'years' | 'reports';
 
-const ENTRY_LABEL: Record<EntryType, string> = {
-  general: 'مصروف عام', salary: 'راتب', advance: 'سلفة', bonus: 'مكافأة', rent: 'إيجار', utility: 'مرافق', purchase: 'مشتريات', payment_collection: 'تحصيل طلاب',
-};
-const EXPENSE_TYPES: EntryType[] = ['general', 'salary', 'advance', 'bonus', 'rent', 'utility', 'purchase'];
-const EXPENSE_CATEGORIES: Record<EntryType, string[]> = {
-  general: ['مستلزمات', 'نقل', 'صيانة', 'دعاية', 'أخرى'],
-  salary: ['راتب شهري'],
-  advance: ['سلفة نقدية'],
-  bonus: ['مكافأة', 'عمولة'],
-  rent: ['إيجار مقر'],
-  utility: ['كهرباء', 'مياه', 'إنترنت', 'هاتف'],
-  purchase: ['أدوات تعليمية', 'أثاث', 'أجهزة'],
-  payment_collection: [],
-};
+type ManualForm = { kind: 'income' | 'expense'; category: string; description: string; amount: string; occurred_on: string };
+type PayrollForm = { employee_id: string; base: string; bonus: string; commission: string; advance: string; deduction: string; deductionIds: string[]; occurred_on: string; description: string };
+type DeductionForm = { employee_id: string; amount: string; reason: string; notes: string; occurred_on: string };
+type LedgerEditForm = { id: string; entry_type: Ledger['entry_type']; date: string; category: string; description: string; amount: string; amountLocked: boolean };
+type LedgerOrder = 'newest' | 'oldest';
+type StatementScope = 'month' | 'all';
 
-/** تنسيق مبلغ مع إشارة للصافي السالب */
-function money(n: number | null | undefined): string {
-  const v = n ?? 0;
-  return `${v < 0 ? '−' : ''}${Math.abs(v).toLocaleString('en-EG', { maximumFractionDigits: 2 })} ج.م`;
+const ARABIC_MONTHS = ['يناير', 'فبراير', 'مارس', 'أبريل', 'مايو', 'يونيو', 'يوليو', 'أغسطس', 'سبتمبر', 'أكتوبر', 'نوفمبر', 'ديسمبر'];
+function monthKey(date: string | null | undefined): string { return /^\d{4}-\d{2}/.test(date ?? '') ? String(date).slice(0, 7) : todayIso().slice(0, 7); }
+function monthLabel(period: string): string {
+  const [year, month] = period.split('-').map(Number);
+  return Number.isInteger(year) && month >= 1 && month <= 12 ? `${ARABIC_MONTHS[month - 1]} ${year}` : period;
+}
+function monthBounds(period: string): { start: string; end: string } {
+  const [year, month] = period.split('-').map(Number);
+  const safeYear = Number.isInteger(year) ? year : Number(todayIso().slice(0, 4));
+  const safeMonth = month >= 1 && month <= 12 ? month : Number(todayIso().slice(5, 7));
+  const lastDay = new Date(Date.UTC(safeYear, safeMonth, 0)).getUTCDate();
+  const key = `${safeYear}-${String(safeMonth).padStart(2, '0')}`;
+  return { start: `${key}-01`, end: `${key}-${String(lastDay).padStart(2, '0')}` };
+}
+function dateForPeriod(period: string): string { const today = todayIso(); return monthKey(today) === period ? today : `${period}-01`; }
+function belongsToPeriod(date: string | null | undefined, period: string): boolean { return monthKey(date) === period; }
+type CollectorTotal = { id: string; name: string; collected: number; rate: number; due: number; paid: number };
+function collectionCommissionTotals(source: Ledger[], rules: CommissionRule[], staffName: Map<string, string>, from: string, to: string): CollectorTotal[] {
+  const data = new Map<string, CollectorTotal>();
+  source.filter((row) => row.entry_type === 'payment_collection').forEach((row) => {
+    const id = row.created_by ?? '';
+    if (!id) return;
+    const rule = rules.find((entry) => entry.staff_id === id && entry.is_active && entry.starts_on <= to && (!entry.ends_on || entry.ends_on >= from));
+    const current = data.get(id) ?? { id, name: row.created_by_name || staffName.get(id) || 'موظف', collected: 0, rate: valueOf(rule?.rate), due: 0, paid: 0 };
+    current.collected += valueOf(row.amount);
+    current.due = Math.round((current.collected * current.rate / 100) * 100) / 100;
+    data.set(id, current);
+  });
+  source.filter((row) => row.entry_type === 'commission' || (row.entry_type === 'salary' && valueOf(row.commission_amount) > 0)).forEach((row) => {
+    if (!row.employee_id) return;
+    const current = data.get(row.employee_id) ?? { id: row.employee_id, name: staffName.get(row.employee_id) ?? 'موظف', collected: 0, rate: 0, due: 0, paid: 0 };
+    current.paid += row.entry_type === 'salary' ? valueOf(row.commission_amount) : valueOf(row.amount);
+    data.set(row.employee_id, current);
+  });
+  return [...data.values()].sort((a, b) => b.due - a.due);
 }
 
-function toneFor(kind: LedgerKind): 'success' | 'warn' {
-  return kind === 'income' ? 'success' : 'warn';
-}
+const MANUAL_INCOME_CATEGORIES = ['دورة أو خدمة إضافية', 'بيع ملازم', 'إيراد قاعة', 'دعم أو تبرع', 'إيراد آخر'];
+const MANUAL_EXPENSE_CATEGORIES = ['مستلزمات', 'نقل', 'صيانة', 'دعاية', 'إيجار', 'كهرباء ومرافق', 'أدوات تعليمية', 'مصروف آخر'];
 
+function money(amount: number): string { return formatMoney(amount); }
+function ledgerTone(kind: Ledger['kind']): 'success' | 'warn' { return kind === 'income' ? 'success' : 'warn'; }
 function AccountingUpsell({ centerId }: { centerId: string }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
-
   const request = async () => {
     setBusy(true); setError(null); setMessage(null);
-    try {
-      await requestAccounting(centerId);
-      setMessage('تم إرسال طلب التفعيل إلى الإدارة وسيتم التواصل معك.');
-    } catch (err) { setError(err); }
+    try { await requestAccounting(centerId); setMessage('تم إرسال طلب التفعيل إلى الإدارة وسيتم التواصل معك.'); }
+    catch (err) { setError(err); }
     finally { setBusy(false); }
   };
-
-  return (
-    <main className="container" style={{ padding: '28px 0' }}>
-      <Card className="stack-lg" style={{ maxWidth: 760, margin: '0 auto' }}>
-        <div style={{ textAlign: 'center' }}>
-          <div className="logo" style={{ margin: '0 auto' }}>💼</div>
-          <h1 className="h2" style={{ marginTop: 10 }}>المحاسبة الذكية لسنترك</h1>
-          <p className="muted" style={{ lineHeight: 1.9 }}>
-            دفتر مالي كامل يمسك حساباتك تلقائياً لحظة بلحظة — بلا جداول Excel ولا أوراق.
-            كل جنيه يدخل أو يخرج من سنترك يظهر في مكانه الصحيح فوراً.
-          </p>
-        </div>
-        <div className="grid grid-2" style={{ marginTop: 8 }}>
-          {[
-            ['📒', 'دفتر إيرادات ومصروفات', 'كل عملية تحصيل تُسجل تلقائياً، والمصروفات والرواتب تدخلها بنقرة واحدة.'],
-            ['📆', 'السنة المالية', 'افتح وأغلق سنتك المالية، ورصيد الافتتاح والمعلق يُرحَّل تلقائياً للسنة الجديدة.'],
-            ['🧾', 'العهدة اليومية', 'مسئول العهدة يسلم عهدته كل يوم، وترى الفروق والتسليمات بضغطة زر.'],
-            ['💸', 'رواتب وسلف ومكافآت', 'سجّل رواتب موظفيك وسلفهم، وافصلها عن المصروفات العادية بدقة.'],
-            ['🤝', 'عمولات المحصلين', 'حدد نسبة عمولة لكل موظف واحسب مستحقاته آلياً من تحصيلاته.'],
-            ['📊', 'تقارير وقوائم مالية', 'قائمة دخل وكشف تدفق نقدي ورواتب جاهزة للطباعة PDF بنفسها.'],
-          ].map(([icon, title, desc]) => (
-            <div key={title} className="card compact soft row" style={{ alignItems: 'flex-start' }}>
-              <div className="logo" style={{ width: 42, height: 42, fontSize: 20, flexShrink: 0 }}>{icon}</div>
-              <div>
-                <strong>{title}</strong>
-                <p className="muted small" style={{ lineHeight: 1.8, marginTop: 4 }}>{desc}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-        <Notice tone="info">
-          مهم: حساباتك تُحفظ وتُسجل في الخلفية منذ بداية اشتراكك — لذلك عند التفعيل ستجد أرصدتك وسجلاتك كاملة
-          وجاهزة من أول يوم، ولن تفقد أي معلومة.
-        </Notice>
-        <Notice tone="warn">الخدمة مدفوعة وتُفعَّل لكل سنتر على حدة بعد مراجعة طلبك من الإدارة.</Notice>
-        <ErrorNotice error={error} />
-        {message ? <Notice tone="success">{message}</Notice> : null}
-        <Button type="button" className="block" disabled={busy} onClick={request}>
-          {busy ? 'جارٍ الإرسال...' : '🔓 اطلب تفعيل المحاسبة الآن'}
-        </Button>
-      </Card>
-    </main>
-  );
+  return <main className="container" style={{ padding: '28px 0' }}><Card className="stack-lg accounting-upsell" style={{ maxWidth: 800, margin: '0 auto' }}>
+    <div style={{ textAlign: 'center' }}><div className="logo" style={{ margin: '0 auto' }}>💼</div><h1 className="h2" style={{ marginTop: 10 }}>المحاسبة الذكية لسنترك</h1><p className="muted">دفتر مالي، صرف الرواتب، سلف بلا ازدواج، عهدة وعمولات وتقارير جاهزة للطباعة.</p></div>
+    <div className="grid grid-3">{[
+      ['📒', 'دفتر واضح', 'إيراد ومصروف وحركة نقدية مع رصيد جارٍ.'],
+      ['🧮', 'رواتب صحيحة', 'تُخصم السلفة من الراتب ولا تُحسب تكلفة مرتين.'],
+      ['📊', 'تقارير عملية', 'قائمة دخل وتدفق نقدي وكشوف رواتب.'],
+    ].map(([icon, title, text]) => <div className="card compact soft" key={title}><div className="small">{icon}</div><strong>{title}</strong><p className="tiny muted">{text}</p></div>)}</div>
+    <Notice tone="info">تُفعّل العهدة تلقائياً مع خدمة المحاسبة، ويظهر للمدير والسكرتير زر تسليم العهدة من داخلها.</Notice>
+    <ErrorNotice error={error} />{message ? <Notice tone="success">{message}</Notice> : null}
+    <Button type="button" className="block" disabled={busy} onClick={() => void request()}>{busy ? 'جارٍ الإرسال…' : '🔓 اطلب تفعيل المحاسبة الآن'}</Button>
+  </Card></main>;
 }
 
 export default function AccountingPage() {
   const { profile, features } = useSession();
   const toast = useToast();
   const centerId = profile?.center_id;
+  const owner = isOwner(profile);
+  const canDeliverCustody = profile?.role === 'manager' || profile?.role === 'secretary';
   const [rows, setRows] = useState<Ledger[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
   const [rules, setRules] = useState<CommissionRule[]>([]);
+  const [deductions, setDeductions] = useState<StaffDeduction[]>([]);
+  const [advanceSettlements, setAdvanceSettlements] = useState<StaffAdvanceSettlement[]>([]);
+  const [deductionSettlements, setDeductionSettlements] = useState<StaffDeductionSettlement[]>([]);
   const [years, setYears] = useState<FiscalYear[]>([]);
-  const [closing, setClosing] = useState(false);
-  const [yearMsg, setYearMsg] = useState<string | null>(null);
-  const [form, setForm] = useState({ entry_type: 'general' as EntryType, employee_id: '', category: '', description: '', amount: '', deduction: '0', occurred_on: todayIso() });
+  const [tab, setTab] = useState<Tab>('overview');
   const [fromDate, setFromDate] = useState('');
   const [toDate, setToDate] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'income' | 'expense'>('all');
+  const [kindFilter, setKindFilter] = useState<'all' | 'income' | 'expense'>('all');
   const [search, setSearch] = useState('');
-  const [commission, setCommission] = useState({ staff_id: '', rate: '3', starts_on: todayIso(), ends_on: '', is_active: true });
-  const [expenseOpen, setExpenseOpen] = useState(false);
-  const [expenseDirty, setExpenseDirty] = useState(false);
-  const [commissionOpen, setCommissionOpen] = useState(false);
-  const [commissionDirty, setCommissionDirty] = useState(false);
-  const [tab, setTab] = useState<Tab>('ledger');
-  const [busy, setBusy] = useState(false);
+  /** الدفتر يظهر الأحدث أولاً؛ الحساب الجاري يحسب دائماً زمنياً ثم يعكس العرض فقط. */
+  const [ledgerOrder, setLedgerOrder] = useState<LedgerOrder>('newest');
+  /** لكل شهر مسير مستقل؛ لا تختلط ذمم أو إضافات شهر بآخر داخل المسير. */
+  const [payrollPeriod, setPayrollPeriod] = useState(() => todayIso().slice(0, 7));
+  const [statementScope, setStatementScope] = useState<StatementScope>('month');
   const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+  const [closing, setClosing] = useState(false);
+  const [yearMessage, setYearMessage] = useState<string | null>(null);
+  const [manualOpen, setManualOpen] = useState(false);
+  const [manualDirty, setManualDirty] = useState(false);
+  const [manualForm, setManualForm] = useState<ManualForm>({ kind: 'income', category: '', description: '', amount: '', occurred_on: todayIso() });
+  const [ledgerEdit, setLedgerEdit] = useState<LedgerEditForm | null>(null);
+  const [ledgerEditDirty, setLedgerEditDirty] = useState(false);
+  const [advanceOpen, setAdvanceOpen] = useState(false);
+  const [advanceDirty, setAdvanceDirty] = useState(false);
+  const [advanceForm, setAdvanceForm] = useState({ employee_id: '', amount: '', occurred_on: todayIso(), description: '' });
+  const [payrollOpen, setPayrollOpen] = useState(false);
+  const [payrollDirty, setPayrollDirty] = useState(false);
+  const [payrollForm, setPayrollForm] = useState<PayrollForm>({ employee_id: '', base: '', bonus: '0', commission: '0', advance: '0', deduction: '0', deductionIds: [], occurred_on: todayIso(), description: '' });
+  const [deductionOpen, setDeductionOpen] = useState(false);
+  const [deductionDirty, setDeductionDirty] = useState(false);
+  const [deductionForm, setDeductionForm] = useState<DeductionForm>({ employee_id: '', amount: '', reason: '', notes: '', occurred_on: todayIso() });
+  const [deductionEditId, setDeductionEditId] = useState<string | null>(null);
+  const [statementEmployeeId, setStatementEmployeeId] = useState('');
+  const [commissionPayOpen, setCommissionPayOpen] = useState(false);
+  const [commissionPayDirty, setCommissionPayDirty] = useState(false);
+  const [commissionPay, setCommissionPay] = useState({ employee_id: '', amount: '', occurred_on: todayIso(), description: '' });
+  const [ruleOpen, setRuleOpen] = useState(false);
+  const [ruleDirty, setRuleDirty] = useState(false);
+  const [ruleForm, setRuleForm] = useState({ staff_id: '', rate: '3', starts_on: todayIso(), ends_on: '', is_active: true });
 
-  const staffName = useMemo(() => new Map(staff.map((s) => [s.id, s.full_name])), [staff]);
-  const filteredRows = useMemo(() => rows.filter((r) => {
-    if (fromDate && r.occurred_on < fromDate) return false;
-    if (toDate && r.occurred_on > toDate) return false;
-    if (typeFilter !== 'all' && r.kind !== typeFilter) return false;
-    if (search) {
-      const q = search.trim();
-      const hay = `${r.category} ${r.description} ${r.created_by_name}`;
-      if (!hay.includes(q)) return false;
-    }
-    return true;
-  }), [rows, fromDate, toDate, typeFilter, search]);
-
-  const totals = useMemo(() => ({
-    income: filteredRows.filter((r) => r.kind === 'income').reduce((s, r) => s + Number(r.amount || 0), 0),
-    expense: filteredRows.filter((r) => r.kind === 'expense').reduce((s, r) => s + Number(r.amount || 0), 0),
-  }), [filteredRows]);
-  const net = totals.income - totals.expense;
-
-  const collectorTotals = useMemo(() => {
-    const map = new Map<string, { name: string; total: number; commission: number; rate: number }>();
-    for (const r of filteredRows.filter((x) => x.entry_type === 'payment_collection')) {
-      const id = r.created_by ?? (r.created_by_name || 'unknown');
-      const current = map.get(id) ?? { name: r.created_by_name || staffName.get(id) || 'غير معروف', total: 0, commission: 0, rate: 0 };
-      current.total += Number(r.amount || 0);
-      const rule = rules.find((x) => x.staff_id === id && x.is_active && x.starts_on <= (toDate || todayIso()) && (!x.ends_on || x.ends_on >= (fromDate || '0000-01-01')));
-      current.rate = Number(rule?.rate ?? 0);
-      current.commission = Math.round((current.total * current.rate / 100) * 100) / 100;
-      map.set(id, current);
-    }
-    return [...map.entries()].map(([id, value]) => ({ id, ...value })).sort((a, b) => b.total - a.total);
-  }, [filteredRows, rules, staffName, fromDate, toDate]);
-
-  const payroll = useMemo(() => staff.map((emp) => {
-    const mine = filteredRows.filter((r) => r.employee_id === emp.id && r.kind === 'expense');
-    const salary = mine.filter((r) => r.entry_type === 'salary').reduce((s, r) => s + Number(r.amount || 0), 0);
-    const advance = mine.filter((r) => r.entry_type === 'advance').reduce((s, r) => s + Number(r.amount || 0), 0);
-    const bonus = mine.filter((r) => r.entry_type === 'bonus').reduce((s, r) => s + Number(r.amount || 0), 0);
-    const deduction = mine.reduce((s, r) => s + Number(r.deduction || 0), 0);
-    const commissionValue = collectorTotals.find((c) => c.id === emp.id)?.commission ?? 0;
-    return { ...emp, salary, advance, bonus: bonus + commissionValue, deduction, net: salary + bonus + commissionValue - deduction - advance };
-  }).filter((x) => x.salary || x.advance || x.bonus || x.deduction), [staff, filteredRows, collectorTotals]);
-
-  const expenseBreakdown = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const r of filteredRows.filter((x) => x.kind === 'expense')) {
-      const label = ENTRY_LABEL[r.entry_type] ?? r.entry_type;
-      map.set(label, (map.get(label) ?? 0) + Number(r.amount || 0));
-    }
-    return [...map.entries()].map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value);
-  }, [filteredRows]);
-
-  const openYear = years.find((y) => y.status === 'open');
-  const opening = openYear ? Number(openYear.opening_balance || 0) : 0;
-  const closingBalance = opening + net;
-
+  const staffName = useMemo(() => new Map(staff.map((person) => [person.id, person.full_name])), [staff]);
+  const filteredRows = useMemo(() => rows.filter((row) => {
+    if (fromDate && row.occurred_on < fromDate) return false;
+    if (toDate && row.occurred_on > toDate) return false;
+    if (kindFilter !== 'all' && row.kind !== kindFilter) return false;
+    const q = search.trim();
+    return !q || `${row.category} ${row.description} ${row.created_by_name} ${staffName.get(row.employee_id ?? '') ?? ''}`.includes(q);
+  }), [rows, fromDate, toDate, kindFilter, search, staffName]);
+  const totals = useMemo(() => periodTotals(filteredRows), [filteredRows]);
+  const openYear = years.find((year) => year.status === 'open');
+  const openingBalance = valueOf(openYear?.opening_balance);
   const runningRows = useMemo(() => {
-    const sorted = [...filteredRows].sort((a, b) => (a.occurred_on < b.occurred_on ? -1 : 1));
-    let bal = opening;
-    return sorted.map((r) => {
-      const amt = Number(r.amount || 0);
-      bal += r.kind === 'income' ? amt : -amt;
-      return { ...r, balance: bal };
+    let balance = openingBalance;
+    // نحسب الرصيد من الأقدم إلى الأحدث، ثم نعكس العرض فقط عند اختيار الأحدث أولاً.
+    const chronological = [...filteredRows].sort((a, b) => a.occurred_on.localeCompare(b.occurred_on) || a.created_at.localeCompare(b.created_at)).map((row) => {
+      balance += row.kind === 'income' ? valueOf(row.amount) : -valueOf(row.amount);
+      return { ...row, balance };
     });
-  }, [filteredRows, opening]);
+    return ledgerOrder === 'newest' ? chronological.reverse() : chronological;
+  }, [filteredRows, openingBalance, ledgerOrder]);
+  const expenseBreakdown = useMemo(() => {
+    const data = new Map<string, number>();
+    filteredRows.forEach((row) => {
+      const amount = operatingExpense(row);
+      if (amount > 0) data.set(LEDGER_ENTRY_LABEL[row.entry_type], (data.get(LEDGER_ENTRY_LABEL[row.entry_type]) ?? 0) + amount);
+    });
+    return [...data.entries()].map(([label, amount]) => ({ label, amount })).sort((a, b) => b.amount - a.amount);
+  }, [filteredRows]);
+  const collectorTotals = useMemo(() => collectionCommissionTotals(filteredRows, rules, staffName, fromDate || '0000-01-01', toDate || todayIso()), [filteredRows, rules, staffName, fromDate, toDate]);
+  const payrollBounds = useMemo(() => monthBounds(payrollPeriod), [payrollPeriod]);
+  const payrollRows = useMemo(() => rows.filter((row) => belongsToPeriod(row.occurred_on, payrollPeriod)), [rows, payrollPeriod]);
+  const payrollCollectorTotals = useMemo(() => collectionCommissionTotals(payrollRows, rules, staffName, payrollBounds.start, payrollBounds.end), [payrollRows, rules, staffName, payrollBounds]);
+  const payrollDeductions = useMemo(() => deductions.filter((item) => belongsToPeriod(item.occurred_on, payrollPeriod)), [deductions, payrollPeriod]);
+  const payroll = useMemo(() => staff.map((employee) => {
+    const period = summarizeEmployeePayroll(payrollRows, employee.id);
+    const monthDeductions = payrollDeductions.filter((item) => item.staff_id === employee.id);
+    const openMonthDeductions = monthDeductions.reduce((sum, item) => sum + Math.max(0, valueOf(item.amount) - valueOf(item.applied_amount)), 0);
+    const salaryPayments = payrollRows.filter((row) => row.employee_id === employee.id && row.entry_type === 'salary').length;
+    return { ...employee, ...period, outstandingAdvance: period.advancesOutstanding, openMonthDeductions, salaryPayments };
+  }), [staff, payrollRows, payrollDeductions]);
+  /** أرصدة كل التاريخ ذمم مرحّلة؛ لا تدخل تقرير الشهر إلا بالجزء الذي سُوّي فعلاً فيه. */
+  const advances = useMemo(() => staff.map((employee) => ({ ...employee, ...summarizeEmployeePayroll(rows, employee.id) })).filter((item) => item.advancesIssued || item.advancesOutstanding), [staff, rows]);
+  const monthlyAdvances = useMemo(() => staff.map((employee) => ({ ...employee, ...summarizeEmployeePayroll(payrollRows, employee.id) })).filter((item) => item.advancesIssued || item.advancesApplied), [staff, payrollRows]);
+  const monthlyAdvanceSettlements = useMemo(() => advanceSettlements.filter((item) => item.period_year === Number(payrollPeriod.slice(0, 4)) && item.period_month === Number(payrollPeriod.slice(5, 7))), [advanceSettlements, payrollPeriod]);
+  const monthlyDeductionSettlements = useMemo(() => deductionSettlements.filter((item) => item.period_year === Number(payrollPeriod.slice(0, 4)) && item.period_month === Number(payrollPeriod.slice(5, 7))), [deductionSettlements, payrollPeriod]);
+  const outstandingDeductions = useMemo(() => deductions.filter((item) => item.status !== 'settled' && valueOf(item.amount) > valueOf(item.applied_amount)), [deductions]);
+  const payrollDeductionItems = useMemo(() => outstandingDeductions.filter((item) => item.staff_id === payrollForm.employee_id), [outstandingDeductions, payrollForm.employee_id]);
+  const selectedPayrollDeductions = useMemo(() => payrollDeductionItems.filter((item) => payrollForm.deductionIds.includes(item.id)), [payrollDeductionItems, payrollForm.deductionIds]);
+  const selectedDeductionBalance = useMemo(() => selectedPayrollDeductions.reduce((sum, item) => sum + valueOf(item.amount) - valueOf(item.applied_amount), 0), [selectedPayrollDeductions]);
+  const payrollAdvanceItems = useMemo(() => {
+    if (!payrollForm.employee_id) return [] as Array<Ledger & { remaining: number }>;
+    const advanceRows = rows.filter((row) => row.employee_id === payrollForm.employee_id && row.entry_type === 'advance').sort((a, b) => a.occurred_on.localeCompare(b.occurred_on) || a.created_at.localeCompare(b.created_at));
+    const knownByAdvance = new Map<string, number>();
+    advanceSettlements.filter((item) => item.staff_id === payrollForm.employee_id).forEach((item) => knownByAdvance.set(item.advance_ledger_id, (knownByAdvance.get(item.advance_ledger_id) ?? 0) + valueOf(item.amount)));
+    const allSalaryApplied = rows.filter((row) => row.employee_id === payrollForm.employee_id && row.entry_type === 'salary').reduce((sum, row) => sum + valueOf(row.advance_applied), 0);
+    let historicUnmapped = Math.max(0, allSalaryApplied - [...knownByAdvance.values()].reduce((sum, amount) => sum + amount, 0));
+    return advanceRows.map((row) => {
+      const afterTracked = Math.max(0, valueOf(row.amount) - (knownByAdvance.get(row.id) ?? 0));
+      const inferredHistoric = Math.min(afterTracked, historicUnmapped);
+      historicUnmapped -= inferredHistoric;
+      return { ...row, remaining: Math.max(0, afterTracked - inferredHistoric) };
+    }).filter((row) => row.remaining > 0.005);
+  }, [rows, advanceSettlements, payrollForm.employee_id]);
+  const selectedEmployeeAdvance = useMemo(() => payrollAdvanceItems.reduce((sum, item) => sum + item.remaining, 0), [payrollAdvanceItems]);
 
   const load = async () => {
-    if (!centerId) return;
+    // قبل/بعد انتهاء الاشتراك لا نطلب أي سجل مالي في الواجهة؛ تبقى صفحة
+    // المعلومات وطلب التفعيل فقط، والحاجز الخادمي هو طبقة الحماية الثانية.
+    if (!centerId || !owner || !features?.accounting) return;
     setError(null);
     try {
       const sb = getSupabase();
-      const [ledgerRes, staffRes, rulesRes, yearsRes] = await Promise.all([
-        sb.from('center_ledger').select('*').eq('center_id', centerId).order('occurred_on', { ascending: false }).limit(1000),
-        sb.from('profiles').select('id,full_name,role').eq('center_id', centerId).in('role', ['teacher', 'manager', 'secretary']).order('full_name'),
+      const [ledgerRes, staffRes, rulesRes, deductionsRes, advanceSettlementsRes, deductionSettlementsRes, fiscalYears] = await Promise.all([
+        sb.from('center_ledger').select('*').eq('center_id', centerId).order('occurred_on', { ascending: false }).limit(1500),
+        sb.from('profiles').select('id,full_name,role').eq('center_id', centerId).in('role', ['center_admin', 'teacher', 'manager', 'secretary']).order('full_name'),
         sb.from('staff_commission_rules').select('*').eq('center_id', centerId).order('created_at', { ascending: false }),
+        sb.from('staff_deductions').select('*').eq('center_id', centerId).order('occurred_on', { ascending: false }).order('created_at', { ascending: false }),
+        // تبقى الشاشة العاملة متاحة أثناء نشر migration؛ سيظهر الأثر التفصيلي فور إنشائها.
+        sb.from('staff_advance_settlements').select('*').eq('center_id', centerId).order('settled_on', { ascending: false }),
+        sb.from('staff_deduction_settlements').select('*').eq('center_id', centerId).order('settled_on', { ascending: false }),
         fetchMyFiscalYears().catch(() => []),
       ]);
       if (ledgerRes.error) throw ledgerRes.error;
       if (staffRes.error) throw staffRes.error;
       if (rulesRes.error) throw rulesRes.error;
-      setRows((ledgerRes.data ?? []) as Ledger[]);
-      setStaff((staffRes.data ?? []) as Staff[]);
-      setRules((rulesRes.data ?? []) as CommissionRule[]);
-      setYears(yearsRes);
-      if (!commission.staff_id && staffRes.data?.[0]) setCommission((old) => ({ ...old, staff_id: (staffRes.data[0] as Staff).id }));
+      if (deductionsRes.error) throw deductionsRes.error;
+      const staffRows = (staffRes.data ?? []) as Staff[];
+      setRows((ledgerRes.data ?? []) as Ledger[]); setStaff(staffRows); setRules((rulesRes.data ?? []) as CommissionRule[]); setDeductions((deductionsRes.data ?? []) as StaffDeduction[]);
+      setAdvanceSettlements((advanceSettlementsRes.data ?? []) as StaffAdvanceSettlement[]); setDeductionSettlements((deductionSettlementsRes.data ?? []) as StaffDeductionSettlement[]); setYears(fiscalYears);
+      if (!ruleForm.staff_id && staffRows[0]) setRuleForm((value) => ({ ...value, staff_id: staffRows[0].id }));
     } catch (err) { setError(err); }
   };
-  useEffect(() => { void load(); }, [centerId]);
+  useEffect(() => { void load(); }, [centerId, owner, features?.accounting]);
 
-  const closeYear = async () => {
-    if (!centerId) return;
-    const label = openYear?.year_label ?? '';
-    if (!window.confirm(`سيتم إغلاق السنة المالية ${label || 'الحالية'} وفتح سنة جديدة مع ترحيل الرصيد الافتتاحي والمستحقات المعلقة. هل أنت متأكد؟`)) return;
-    setClosing(true); setError(null); setYearMsg(null);
-    try {
-      const res = await closeFiscalYear(centerId);
-      setYearMsg(`تم إغلاق سنة ${res.closed} وفتح سنة ${res.opened} — الرصيد المرحّل: ${formatMoney(res.carry_balance)} والمستحقات المعلقة: ${formatMoney(res.carry_pending)}.`);
-      await load();
-    } catch (err) { setError(err); }
-    finally { setClosing(false); }
-  };
-
-  if (profile && !isOwner(profile)) return <Card><Notice tone="error">المحاسبة متاحة لصاحب السنتر فقط.</Notice></Card>;
-  if (isOwner(profile) && features && !features.accounting) {
-    return centerId ? <AccountingUpsell centerId={centerId} /> : null;
+  if (profile && !owner) {
+    if (canDeliverCustody) return <CustodyWorkspace embedded />;
+    return <Card><Notice tone="error">المحاسبة متاحة لصاحب السنتر، أما المدير والسكرتير فيمكنهما الدخول لتسليم العهدة فقط.</Notice></Card>;
   }
+  if (owner && features && !features.accounting) return centerId ? <AccountingUpsell centerId={centerId} /> : null;
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!centerId) return;
-    const amount = Number(form.amount);
-    const deduction = Math.max(0, Number(form.deduction) || 0);
-    if (!form.category.trim() || !amount || amount <= 0) return setError(new Error('أدخل التصنيف والمبلغ الصحيح'));
-    if (['salary', 'advance', 'bonus'].includes(form.entry_type) && !form.employee_id) return setError(new Error('اختر الموظف للحركات المرتبطة بالراتب أو السلفة أو المكافأة'));
+  const startManual = (kind: ManualForm['kind']) => {
+    setError(null); setManualDirty(false); setManualForm({ kind, category: kind === 'income' ? MANUAL_INCOME_CATEGORIES[0] : MANUAL_EXPENSE_CATEGORIES[0], description: '', amount: '', occurred_on: todayIso() }); setManualOpen(true);
+  };
+  const saveManual = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!centerId) return;
+    const amount = Number(manualForm.amount);
+    if (!manualForm.category.trim() || !Number.isFinite(amount) || amount <= 0) return setError(new Error('أدخل تصنيفاً ومبلغاً صحيحاً.'));
     setBusy(true); setError(null);
     try {
-      const { error } = await getSupabase().from('center_ledger').insert({
-        center_id: centerId,
-        kind: 'expense',
-        entry_type: form.entry_type,
-        category: form.category.trim(),
-        description: form.description.trim(),
-        amount,
-        occurred_on: form.occurred_on || todayIso(),
-        employee_id: form.employee_id || null,
-        created_by: profile?.id,
-        created_by_name: profile?.full_name ?? '',
-        deduction,
-        period_month: Number((form.occurred_on || todayIso()).slice(5, 7)),
-        period_year: Number((form.occurred_on || todayIso()).slice(0, 4)),
-      });
-      if (error) throw error;
-      setForm({ entry_type: 'general', employee_id: '', category: '', description: '', amount: '', deduction: '0', occurred_on: todayIso() });
-      setExpenseDirty(false); setExpenseOpen(false);
-      toast.success('تم تسجيل المصروف', 'إيرادات الطلاب تسجل آلياً فقط من قسم التحصيل لمنع ازدواج الإيراد.');
-      await load();
-    } catch (err) { setError(err); }
-    finally { setBusy(false); }
+      const { error: rpcError } = await getSupabase().rpc('record_manual_ledger_entry', { p_center: centerId, p_kind: manualForm.kind, p_category: manualForm.category.trim(), p_description: manualForm.description.trim(), p_amount: amount, p_date: manualForm.occurred_on || todayIso() });
+      if (rpcError) throw rpcError;
+      setManualOpen(false); setManualDirty(false); toast.success(`تم تسجيل ${manualForm.kind === 'income' ? 'الإيراد' : 'المصروف'} اليدوي`); await load();
+    } catch (err) { setError(err); } finally { setBusy(false); }
   };
-
-  const saveCommission = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!centerId || !commission.staff_id) return;
-    const rate = Number(commission.rate);
-    if (Number.isNaN(rate) || rate < 0 || rate > 100) return setError(new Error('نسبة العمولة يجب أن تكون بين 0 و 100'));
-    setError(null);
+  const openLedgerEdit = (row: Ledger) => {
+    setLedgerEdit({ id: row.id, entry_type: row.entry_type, date: row.occurred_on, category: row.category, description: row.description, amount: String(valueOf(row.amount)), amountLocked: row.entry_type === 'salary' });
+    setLedgerEditDirty(false); setError(null);
+  };
+  const saveLedgerEdit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!ledgerEdit) return;
+    const amount = Number(ledgerEdit.amount);
+    if (!ledgerEdit.amountLocked && (!Number.isFinite(amount) || amount <= 0)) return setError(new Error('أدخل مبلغاً صحيحاً أكبر من صفر.'));
+    setBusy(true); setError(null);
     try {
-      const { error } = await getSupabase().from('staff_commission_rules').upsert({
-        center_id: centerId,
-        staff_id: commission.staff_id,
-        rate,
-        starts_on: commission.starts_on || todayIso(),
-        ends_on: commission.ends_on || null,
-        is_active: commission.is_active,
-      }, { onConflict: 'center_id,staff_id' });
-      if (error) throw error;
-      setCommissionDirty(false); setCommissionOpen(false);
-      toast.success('تم حفظ نسبة العمولة');
-      await load();
-    } catch (err) { setError(err); }
+      const { error: rpcError } = await getSupabase().rpc('amend_accounting_ledger_entry', { p_entry: ledgerEdit.id, p_date: ledgerEdit.date, p_category: ledgerEdit.category.trim(), p_description: ledgerEdit.description.trim(), p_amount: ledgerEdit.amountLocked ? null : amount });
+      if (rpcError) throw rpcError;
+      setLedgerEdit(null); setLedgerEditDirty(false); toast.success('تم تعديل القيد المحاسبي'); await load();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  };
+  const saveAdvance = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!centerId || !advanceForm.employee_id) return setError(new Error('اختر الموظف أولاً.'));
+    const amount = Number(advanceForm.amount); if (!Number.isFinite(amount) || amount <= 0) return setError(new Error('أدخل مبلغ سلفة صحيحاً.'));
+    setBusy(true); setError(null);
+    try {
+      const { error: rpcError } = await getSupabase().rpc('record_staff_advance', { p_center: centerId, p_employee: advanceForm.employee_id, p_amount: amount, p_date: advanceForm.occurred_on || todayIso(), p_description: advanceForm.description.trim() });
+      if (rpcError) throw rpcError;
+      setAdvanceOpen(false); setAdvanceDirty(false); toast.success('تم صرف السلفة', 'سجلت حركة نقدية ورصيداً مستحقاً على الموظف، وليست مصروفاً إضافياً.'); await load();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  };
+  const preparePayroll = (employeeId: string, period = payrollPeriod) => {
+    // لا يعرض المسير القديم، لكنه يقترح الرصيد المتبقي المرحّل فقط كي يمكن تسويته جزئياً الآن.
+    const advance = employeeId ? summarizeEmployeePayroll(rows, employeeId).advancesOutstanding : 0;
+    const employeeDeductions = outstandingDeductions.filter((item) => item.staff_id === employeeId);
+    const deductionIds = employeeDeductions.map((item) => item.id);
+    const deduction = employeeDeductions.reduce((sum, item) => sum + valueOf(item.amount) - valueOf(item.applied_amount), 0);
+    setPayrollForm({ employee_id: employeeId, base: '', bonus: '0', commission: '0', advance: String(advance), deduction: String(deduction), deductionIds, occurred_on: dateForPeriod(period), description: '' });
+  };
+  const choosePayrollDeductions = (deductionIds: string[]) => {
+    const total = payrollDeductionItems.filter((item) => deductionIds.includes(item.id)).reduce((sum, item) => sum + valueOf(item.amount) - valueOf(item.applied_amount), 0);
+    setPayrollForm((value) => ({ ...value, deductionIds, deduction: String(total) })); setPayrollDirty(true);
+  };
+  const savePayroll = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!centerId || !payrollForm.employee_id) return setError(new Error('اختر الموظف أولاً.'));
+    if (!belongsToPeriod(payrollForm.occurred_on, payrollPeriod)) return setError(new Error(`تاريخ الصرف يجب أن يكون ضمن مسير ${monthLabel(payrollPeriod)}.`));
+    const values = { base: Number(payrollForm.base), bonus: Number(payrollForm.bonus) || 0, commission: Number(payrollForm.commission) || 0, advance: Number(payrollForm.advance) || 0, deduction: Number(payrollForm.deduction) || 0 };
+    if (!Number.isFinite(values.base) || values.base <= 0 || Object.values(values).some((value) => value < 0)) return setError(new Error('تحقق من أرقام صرف الراتب؛ الراتب الأساسي أكبر من صفر ولا تقبل الحقول قيماً سالبة.'));
+    if (values.advance > selectedEmployeeAdvance) return setError(new Error('مبلغ السلفة المعتمد أكبر من رصيد سلف الموظف.'));
+    if (values.deduction > selectedDeductionBalance) return setError(new Error('مبلغ الخصومات المعتمد أكبر من رصيد الخصومات المحددة.'));
+    setBusy(true); setError(null);
+    try {
+      const { error: rpcError } = await getSupabase().rpc('record_salary_payment', { p_center: centerId, p_employee: payrollForm.employee_id, p_base_salary: values.base, p_bonus: values.bonus, p_commission: values.commission, p_advance_applied: values.advance, p_deduction_applied: values.deduction, p_deduction_ids: payrollForm.deductionIds, p_date: payrollForm.occurred_on || todayIso(), p_description: payrollForm.description.trim() });
+      if (rpcError) throw rpcError;
+      setPayrollOpen(false); setPayrollDirty(false); toast.success('تم صرف الراتب', 'عولجت السلف والخصومات المعتمدة ذرّياً، ودُفع صافي الراتب فقط.'); await load();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  };
+  const saveDeduction = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!centerId || !deductionForm.employee_id) return setError(new Error('اختر الموظف أولاً.'));
+    const amount = Number(deductionForm.amount);
+    if (!Number.isFinite(amount) || amount <= 0 || !deductionForm.reason.trim()) return setError(new Error('أدخل سبب الخصم ومبلغاً صحيحاً.'));
+    setBusy(true); setError(null);
+    try {
+      const { error: rpcError } = deductionEditId
+        ? await getSupabase().rpc('amend_staff_deduction', { p_deduction: deductionEditId, p_amount: amount, p_reason: deductionForm.reason.trim(), p_notes: deductionForm.notes.trim(), p_date: deductionForm.occurred_on || todayIso() })
+        : await getSupabase().rpc('record_staff_deduction', { p_center: centerId, p_employee: deductionForm.employee_id, p_amount: amount, p_reason: deductionForm.reason.trim(), p_date: deductionForm.occurred_on || todayIso(), p_notes: deductionForm.notes.trim() });
+      if (rpcError) throw rpcError;
+      setDeductionOpen(false); setDeductionDirty(false); setDeductionEditId(null); toast.success(deductionEditId ? 'تم تعديل الخصم' : 'تم تسجيل الخصم', deductionEditId ? 'احتُفظ بما عولج سابقاً ولا يمكن تخفيض الخصم عنه.' : 'لم يسجل كمصروف أو خروج نقدي؛ سيقترح عند صرف راتب الموظف.'); await load();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  };
+  const saveCommissionPayment = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!centerId || !commissionPay.employee_id) return setError(new Error('اختر الموظف أولاً.'));
+    const amount = Number(commissionPay.amount); if (!Number.isFinite(amount) || amount <= 0) return setError(new Error('أدخل مبلغ العمولة الصحيح.'));
+    setBusy(true); setError(null);
+    try {
+      const { error: rpcError } = await getSupabase().rpc('record_staff_commission_payment', { p_center: centerId, p_employee: commissionPay.employee_id, p_amount: amount, p_date: commissionPay.occurred_on || todayIso(), p_description: commissionPay.description.trim() });
+      if (rpcError) throw rpcError;
+      setCommissionPayOpen(false); setCommissionPayDirty(false); toast.success('تم تسجيل صرف العمولة'); await load();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  };
+  const saveRule = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!centerId || !ruleForm.staff_id) return setError(new Error('اختر الموظف.'));
+    const rate = Number(ruleForm.rate); if (!Number.isFinite(rate) || rate < 0 || rate > 100) return setError(new Error('نسبة العمولة بين 0 و100.'));
+    setBusy(true); setError(null);
+    try {
+      const { error: upsertError } = await getSupabase().from('staff_commission_rules').upsert({ center_id: centerId, staff_id: ruleForm.staff_id, rate, starts_on: ruleForm.starts_on || todayIso(), ends_on: ruleForm.ends_on || null, is_active: ruleForm.is_active }, { onConflict: 'center_id,staff_id' });
+      if (upsertError) throw upsertError;
+      setRuleOpen(false); setRuleDirty(false); toast.success('تم حفظ قاعدة العمولة'); await load();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  };
+  const closeYear = async () => {
+    if (!centerId || !window.confirm(`سيتم إغلاق السنة ${openYear?.year_label ?? 'الحالية'} وفتح سنة جديدة مع ترحيل الرصيد. هل أنت متأكد؟`)) return;
+    setClosing(true); setError(null); setYearMessage(null);
+    try { const result = await closeFiscalYear(centerId); setYearMessage(`تم إغلاق ${result.closed} وفتح ${result.opened}. الرصيد المرحّل: ${money(result.carry_balance)}.`); await load(); }
+    catch (err) { setError(err); } finally { setClosing(false); }
   };
 
-  const printFinancial = () => printReport(buildReportHtml('التقرير المالي', `${fromDate || 'البداية'} — ${toDate || 'اليوم'}`, [
-    { title: 'الملخص', headers: ['البند', 'القيمة'], rows: [['الإيرادات', formatMoney(totals.income)], ['المصروفات', formatMoney(totals.expense)], ['الصافي', money(net)]] },
-    { title: 'تحصيل الموظفين', headers: ['الموظف', 'المحصل', 'نسبة العمولة', 'العمولة'], rows: collectorTotals.map((c) => [c.name, formatMoney(c.total), `${c.rate}%`, formatMoney(c.commission)]) },
-    { title: 'آخر الحركات', headers: ['التاريخ', 'النوع', 'البند', 'المبلغ', 'المنفذ'], rows: filteredRows.map((r) => [formatDate(r.occurred_on), r.kind === 'income' ? 'إيراد' : 'مصروف', `${ENTRY_LABEL[r.entry_type] ?? r.entry_type} — ${r.category}`, formatMoney(r.amount), r.created_by_name || staffName.get(r.employee_id ?? '') || '—']) },
-  ], { name: profile?.full_name }));
+  const printFinancial = () => void printCenterReport(centerId, (branding) => buildReportHtml('التقرير المالي الشامل', `${fromDate || 'البداية'} — ${toDate || 'اليوم'}`, [
+    { title: 'ملخص الربح والخسارة', headers: ['البند', 'القيمة'], rows: [['الإيرادات التشغيلية', money(totals.income)], ['تكاليف التشغيل', money(totals.operatingCosts)], ['صافي الربح / الخسارة', money(totals.netProfit)]] },
+    { title: 'ملخص الحركة النقدية', headers: ['البند', 'القيمة'], rows: [['رصيد الافتتاح', money(openingBalance)], ['نقد داخل', money(totals.cashIncome)], ['نقد خارج (يشمل السلف)', money(totals.cashOut)], ['الرصيد الجاري', money(openingBalance + totals.cashNet)]] },
+    { title: 'السلف القائمة', headers: ['الموظف', 'المرصود', 'المخصوم من راتب', 'المتبقي'], rows: advances.map((item) => [item.full_name, money(item.advancesIssued), money(item.advancesApplied), money(item.advancesOutstanding)]) },
+    { title: 'خصومات بانتظار صرف الراتب', headers: ['الموظف', 'السبب', 'المسجل', 'المعالج', 'المتبقي'], rows: outstandingDeductions.length ? outstandingDeductions.map((item) => [staffName.get(item.staff_id) ?? 'موظف', item.reason, money(valueOf(item.amount)), money(valueOf(item.applied_amount)), money(valueOf(item.amount) - valueOf(item.applied_amount))]) : [['—', 'لا توجد خصومات معلقة', '—', '—', '—']] },
+  ], { name: profile?.full_name, branding }));
+  const printIncomeStatement = () => void printCenterReport(centerId, (branding) => buildReportHtml('قائمة الدخل', `${fromDate || 'البداية'} — ${toDate || 'اليوم'}`, [
+    { title: 'الإيرادات', headers: ['البند', 'القيمة'], rows: [['الإيرادات التشغيلية', money(totals.income)]] },
+    { title: 'تكلفة التشغيل', headers: ['البند', 'القيمة'], rows: [...expenseBreakdown.map((item) => [item.label, money(item.amount)]), ['إجمالي تكلفة التشغيل', money(totals.operatingCosts)]] },
+    { title: 'النتيجة', headers: ['البند', 'القيمة'], rows: [['صافي الربح / الخسارة', money(totals.netProfit)]] },
+  ], { name: profile?.full_name, branding }));
+  const printCashFlow = () => void printCenterReport(centerId, (branding) => buildReportHtml('كشف التدفق النقدي', `${fromDate || 'البداية'} — ${toDate || 'اليوم'}`, [
+    { title: 'النقدية', headers: ['البند', 'القيمة'], rows: [['رصيد افتتاحي', money(openingBalance)], ['النقد الداخل', `+ ${money(totals.cashIncome)}`], ['النقد الخارج (يشمل السلف)', `− ${money(totals.cashOut)}`], ['الرصيد الختامي', money(openingBalance + totals.cashNet)]] },
+  ], { name: profile?.full_name, branding }));
+  const printMonthlyPayroll = () => void printCenterReport(centerId, (branding) => buildReportHtml(`مسير رواتب — ${monthLabel(payrollPeriod)}`, 'مسير شهري مستقل؛ يعرض الصرف والتسويات التي اعتمدت فيه فقط، مع بقاء مصدر الذمة في كشفها التفصيلي.', [
+    { title: 'ملخص مسير الشهر', headers: ['البند', 'القيمة'], rows: [['إجمالي الأساسي', money(payroll.reduce((sum, item) => sum + item.baseSalary, 0))], ['الإضافات والعمولات ضمن الراتب', money(payroll.reduce((sum, item) => sum + item.bonuses + item.commissions, 0))], ['سلف سُويت هذا الشهر', money(payroll.reduce((sum, item) => sum + item.advancesApplied, 0))], ['خصومات عولجت هذا الشهر', money(payroll.reduce((sum, item) => sum + item.deductions, 0))], ['صافي النقد المصروف', money(payroll.reduce((sum, item) => sum + item.cashPaid, 0))]] },
+    { title: 'مسير الرواتب', headers: ['الموظف', 'الأساسي', 'إضافات / عمولة', 'سلفة مسوّاة', 'خصم', 'صافي المصروف', 'الحالة'], rows: payroll.map((item) => [item.full_name, money(item.baseSalary), money(item.bonuses + item.commissions), money(item.advancesApplied), money(item.deductions), money(item.cashPaid), item.salaryPayments ? `${item.salaryPayments} عملية صرف` : 'لم يصرف بعد']) },
+    { title: 'عمولات التحصيل في الشهر', headers: ['الموظف', 'المحصل', 'المستحق', 'المصروف', 'المتبقي'], rows: payrollCollectorTotals.length ? payrollCollectorTotals.map((item) => [item.name, money(item.collected), money(item.due), money(item.paid), money(Math.max(0, item.due - item.paid))]) : [['—', '—', 'لا توجد عمولات لهذا الشهر', '—', '—']] },
+  ], { name: profile?.full_name, branding }));
+  const printEmployeeStatement = (employeeId: string) => {
+    const employee = staff.find((item) => item.id === employeeId);
+    if (!employee) return;
+    const monthly = statementScope === 'month';
+    const scopeRows = monthly ? rows.filter((row) => belongsToPeriod(row.occurred_on, payrollPeriod)) : rows;
+    const scopeDeductions = monthly ? deductions.filter((item) => belongsToPeriod(item.occurred_on, payrollPeriod)) : deductions;
+    const summary = summarizeEmployeePayroll(scopeRows, employeeId);
+    const allTime = summarizeEmployeePayroll(rows, employeeId);
+    const employeeRows = scopeRows.filter((row) => row.employee_id === employeeId || (row.entry_type === 'payment_collection' && row.created_by === employeeId)).sort((a, b) => b.occurred_on.localeCompare(a.occurred_on) || b.created_at.localeCompare(a.created_at));
+    const employeeDeductions = scopeDeductions.filter((item) => item.staff_id === employeeId).sort((a, b) => b.occurred_on.localeCompare(a.occurred_on) || b.created_at.localeCompare(a.created_at));
+    const openDeductions = employeeDeductions.reduce((sum, item) => sum + Math.max(0, valueOf(item.amount) - valueOf(item.applied_amount)), 0);
+    const settlementInScope = (item: { period_year: number; period_month: number }) => !monthly || (item.period_year === Number(payrollPeriod.slice(0, 4)) && item.period_month === Number(payrollPeriod.slice(5, 7)));
+    const scopedAdvanceSettlements = advanceSettlements.filter((item) => item.staff_id === employeeId && settlementInScope(item)).sort((a, b) => b.settled_on.localeCompare(a.settled_on) || b.created_at.localeCompare(a.created_at));
+    const scopedDeductionSettlements = deductionSettlements.filter((item) => item.staff_id === employeeId && settlementInScope(item)).sort((a, b) => b.settled_on.localeCompare(a.settled_on) || b.created_at.localeCompare(a.created_at));
+    const carriedAdvance = monthly ? allTime.advancesOutstanding : 0;
+    const carriedDeductions = monthly ? deductions.filter((item) => item.staff_id === employeeId && !belongsToPeriod(item.occurred_on, payrollPeriod)).reduce((sum, item) => sum + Math.max(0, valueOf(item.amount) - valueOf(item.applied_amount)), 0) : 0;
+    const scopeLabel = monthly ? `مسير ${monthLabel(payrollPeriod)}` : 'من بداية التعامل حتى اليوم';
+    void printCenterReport(centerId, (branding) => buildReportHtml(`كشف حساب الموظف — ${employee.full_name}`, `${scopeLabel} · كشف تفصيلي للراتب والذمم والحركات المرتبطة.`, [
+      { title: 'بيانات ومسير الاستحقاق', headers: ['البند', 'القيمة'], rows: [['الموظف', employee.full_name], ['الدور', roleLabel(employee.role)], ['الراتب الأساسي المسجل', money(summary.baseSalary)], ['المكافآت والإضافات', money(summary.bonuses)], ['العمولات المصروفة / ضمن الراتب', money(summary.commissions)], ['صافي النقد المدفوع', money(summary.cashPaid)]] },
+      { title: 'السلف والخصومات في نطاق الكشف', headers: ['البند', 'القيمة'], rows: [['سلف صُرفت في النطاق', money(summary.advancesIssued)], ['سلف سُويت مع الراتب', money(summary.advancesApplied)], ['رصيد سلف النطاق', money(summary.advancesOutstanding)], ['خصومات عولجت مع الراتب', money(summary.deductions)], ['خصومات معلقة في النطاق', money(openDeductions)], ...(monthly ? [['رصيد سلف مرحّل متبقٍ بعد هذا المسير', money(carriedAdvance)], ['خصومات مرحّلة قابلة للتسوية', money(carriedDeductions)]] : [])] },
+      { title: 'تفاصيل مسيرات الرواتب', headers: ['التاريخ', 'الأساسي', 'إضافات', 'عمولة', 'سلفة مسوّاة', 'خصم', 'صافي النقد', 'البيان'], rows: employeeRows.filter((row) => row.entry_type === 'salary').length ? employeeRows.filter((row) => row.entry_type === 'salary').map((row) => [formatDate(row.occurred_on), money(valueOf(row.gross_amount ?? row.amount)), money(valueOf(row.bonus_amount)), money(valueOf(row.commission_amount)), money(valueOf(row.advance_applied)), money(valueOf(row.deduction)), money(valueOf(row.amount)), row.description || 'صرف راتب']) : [['—', '—', 'لا يوجد صرف راتب في نطاق الكشف', '—', '—', '—', '—', '—']] },
+      { title: 'تفاصيل تسويات السلف', headers: ['تاريخ التسوية', 'شهر المسير', 'تاريخ السلفة', 'مبلغ سُوّي'], rows: scopedAdvanceSettlements.length ? scopedAdvanceSettlements.map((item) => { const source = rows.find((row) => row.id === item.advance_ledger_id); return [formatDate(item.settled_on), monthLabel(`${item.period_year}-${String(item.period_month).padStart(2, '0')}`), source ? formatDate(source.occurred_on) : '—', money(valueOf(item.amount))]; }) : [['—', '—', 'لا توجد تسويات سلف في نطاق الكشف', '—']] },
+      { title: 'تفاصيل تسويات الخصومات والعهدة', headers: ['تاريخ التسوية', 'شهر المسير', 'مصدر الخصم', 'مبلغ سُوّي'], rows: scopedDeductionSettlements.length ? scopedDeductionSettlements.map((item) => { const source = deductions.find((deduction) => deduction.id === item.deduction_id); return [formatDate(item.settled_on), monthLabel(`${item.period_year}-${String(item.period_month).padStart(2, '0')}`), `${source?.reason ?? 'خصم'}${source?.notes ? ` — ${source.notes}` : ''}`, money(valueOf(item.amount))]; }) : [['—', '—', 'لا توجد تسويات خصومات في نطاق الكشف', '—']] },
+      { title: 'الحركات المرتبطة', headers: ['التاريخ', 'الحركة', 'البيان', 'الأثر النقدي', 'تفصيل'], rows: employeeRows.length ? employeeRows.filter((row) => row.entry_type !== 'salary').map((row) => [formatDate(row.occurred_on), LEDGER_ENTRY_LABEL[row.entry_type], row.description || row.category, `${row.kind === 'income' ? '+' : '−'} ${money(valueOf(row.amount))}`, row.entry_type === 'advance' ? `سلفة: ${money(valueOf(row.amount))}` : row.entry_type === 'payment_collection' ? 'تحصيل باسم الموظف' : row.entry_type === 'commission' ? 'عمولة مستقلة' : '—']) : [['—', 'لا توجد حركات أخرى', '—', '—', '—']] },
+      { title: 'سجل الخصومات', headers: ['التاريخ', 'السبب', 'الإجمالي', 'المعالج', 'المتبقي', 'الحالة'], rows: employeeDeductions.length ? employeeDeductions.map((item) => [formatDate(item.occurred_on), `${item.reason}${item.notes ? ` — ${item.notes}` : ''}`, money(valueOf(item.amount)), money(valueOf(item.applied_amount)), money(Math.max(0, valueOf(item.amount) - valueOf(item.applied_amount))), item.status === 'settled' ? 'مُعالج' : item.status === 'partial' ? 'معالج جزئياً' : 'بانتظار الصرف']) : [['—', 'لا توجد خصومات مستقلة في نطاق الكشف', '—', '—', '—', '—']] },
+    ], { name: profile?.full_name, branding }));
+  };
 
-  const printIncomeStatement = () => printReport(buildReportHtml('قائمة الدخل', `${fromDate || 'البداية'} — ${toDate || 'اليوم'}`, [
-    { title: 'الإيرادات', headers: ['البند', 'القيمة'], rows: [['تحصيل الطلاب', formatMoney(totals.income)], ['إجمالي الإيرادات', formatMoney(totals.income)]] },
-    { title: 'المصروفات', headers: ['البند', 'القيمة'], rows: expenseBreakdown.map((b) => [b.label, formatMoney(b.value)]).concat([['إجمالي المصروفات', formatMoney(totals.expense)]]) },
-    { title: 'صافي الربح / الخسارة', headers: ['البند', 'القيمة'], rows: [['الصافي', money(net)]] },
-  ], { name: profile?.full_name }));
+  const printLedgerEntry = (row: Ledger & { balance?: number }) => void printCenterReport(centerId, (branding) => buildReportHtml(`سند ${row.kind === 'income' ? 'إيراد' : 'صرف'} مالي`, `قيد رقم ${row.id} · ${formatDate(row.occurred_on)}`, [
+    { title: 'بيانات العملية', headers: ['البند', 'البيان'], rows: [
+      ['نوع الحركة', row.kind === 'income' ? 'إيراد / تحصيل' : 'مصروف / صرف'], ['التصنيف', LEDGER_ENTRY_LABEL[row.entry_type]], ['التفاصيل', row.description || row.category || '—'],
+      ['المبلغ', money(valueOf(row.amount))], ['منشئ العملية', row.created_by_name || '—'], ['التاريخ', formatDate(row.occurred_on)],
+      ...(row.entry_type === 'salary' ? [['سلفة مخصومة', money(valueOf(row.advance_applied))], ['خصومات معالجة', money(valueOf(row.deduction))]] : []),
+    ] },
+  ], { name: profile?.full_name, branding }));
 
-  const printCashFlow = () => printReport(buildReportHtml('كشف التدفق النقدي', `${fromDate || 'البداية'} — ${toDate || 'اليوم'}`, [
-    { title: 'الحركة النقدية', headers: ['البند', 'القيمة'], rows: [['رصيد افتتاحي', formatMoney(opening)], ['إيرادات', `+ ${formatMoney(totals.income)}`], ['مصروفات', `− ${formatMoney(totals.expense)}`], ['الرصيد الختامي', formatMoney(closingBalance)]] },
-  ], { name: profile?.full_name }));
-
-  const printPayroll = (p: (typeof payroll)[number]) => printReport(buildPayrollReportHtml({ name: p.full_name, role: roleLabel(p.role) }, `${fromDate || 'البداية'} — ${toDate || 'اليوم'}`, {
-    base: p.salary, bonus: p.bonus, advances: p.advance, deductions: p.deduction, net: p.net,
-  }, { name: profile?.full_name }));
+  const resetFilters = () => { setFromDate(''); setToDate(''); setKindFilter('all'); setSearch(''); };
+  const tabItems: Array<[Tab, string]> = [['overview', '⌂ ملخص'], ['ledger', '📒 الدفتر'], ['payroll', '🧮 صرف الرواتب'], ['advances', '💳 السلفيات'], ['deductions', '➖ الخصومات'], ['commissions', '🤝 العمولات'], ['custody', '🧾 العهدة'], ['years', '📆 سنة مالية'], ['reports', '🖨 تقارير']];
 
   return <>
-    <PageHeader title="المحاسبة" subtitle="منظومة مالية متكاملة: دفتر عام، تحليل وقوائم مالية، موظفون ورواتب، عمولات، سنة مالية وتقارير." actions={<Button type="button" variant="secondary" onClick={printFinancial}>🖨 طباعة التقرير المالي</Button>} />
-    <ErrorNotice error={error} />
-    {yearMsg ? <Notice tone="success">{yearMsg}</Notice> : null}
-
-    <div className="grid grid-4" style={{ marginBottom: 18 }}>
-      <Card className="compact kpi"><span className="muted">الإيرادات (الفترة)</span><div className="kpi-value" style={{ color: 'var(--success)' }}>{money(totals.income)}</div></Card>
-      <Card className="compact kpi"><span className="muted">المصروفات (الفترة)</span><div className="kpi-value" style={{ color: 'var(--danger)' }}>{money(totals.expense)}</div></Card>
-      <Card className="compact kpi"><span className="muted">صافي الربح / الخسارة</span><div className="kpi-value" style={{ color: net >= 0 ? 'var(--accent)' : 'var(--danger)' }}>{money(net)}</div></Card>
-      <Card className="compact kpi"><span className="muted">الرصيد الختامي</span><div className="kpi-value">{money(closingBalance)}</div></Card>
+    <PageHeader title="المحاسبة" subtitle="لوحة مالية عملية: أرباح، نقدية، رواتب، سلف، عمولات، عهدة وتقارير دقيقة." actions={<Button type="button" variant="secondary" onClick={printFinancial}>🖨 طباعة الملخص</Button>} />
+    <ErrorNotice error={error} />{yearMessage ? <Notice tone="success">{yearMessage}</Notice> : null}
+    <div className="grid grid-4 accounting-kpis" style={{ margin: '16px 0' }}>
+      <Card className="compact kpi"><span className="muted">إيرادات تشغيلية</span><div className="kpi-value" style={{ color: 'var(--success)' }}>{money(totals.income)}</div><span className="tiny muted">ضمن الفترة المختارة</span></Card>
+      <Card className="compact kpi"><span className="muted">تكلفة تشغيل</span><div className="kpi-value" style={{ color: 'var(--danger)' }}>{money(totals.operatingCosts)}</div><span className="tiny muted">لا تشمل السلف</span></Card>
+      <Card className="compact kpi"><span className="muted">صافي الربح / الخسارة</span><div className="kpi-value" style={{ color: totals.netProfit >= 0 ? 'var(--accent)' : 'var(--danger)' }}>{money(totals.netProfit)}</div><span className="tiny muted">الإيراد − التكلفة</span></Card>
+      <Card className="compact kpi"><span className="muted">الرصيد النقدي الجاري</span><div className="kpi-value">{money(openingBalance + totals.cashNet)}</div><span className="tiny muted">يشمل السلف المصروفة</span></Card>
     </div>
+    <Card className="stack accounting-filter-card" style={{ marginBottom: 16 }}><div className="grid grid-4"><Input label="من تاريخ" type="date" value={fromDate} onChange={(event) => setFromDate(event.target.value)} /><Input label="إلى تاريخ" type="date" value={toDate} onChange={(event) => setToDate(event.target.value)} /><Select label="نوع الحركة" value={kindFilter} onChange={(event) => setKindFilter(event.target.value as 'all' | 'income' | 'expense')}><option value="all">كل الحركات</option><option value="income">إيرادات</option><option value="expense">مصروفات</option></Select><Input label="بحث في الدفتر" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="تصنيف أو موظف أو وصف" /></div><div className="row-between"><span className="tiny muted">تسري الفترة على الدفتر والتحليل والتقارير. للرواتب والسلف والعمولات اختر شهر المسير من تبويبها. عدد الحركات: {filteredRows.length}</span><Button type="button" variant="ghost" onClick={resetFilters}>مسح الفلاتر</Button></div></Card>
+    <div className="tabs accounting-tabs" style={{ marginBottom: 18 }}>{tabItems.map(([key, label]) => <button type="button" key={key} className={`tab ${tab === key ? 'active' : ''}`} onClick={() => setTab(key)}>{label}</button>)}</div>
 
-    <Card className="stack" style={{ marginBottom: 18 }}>
-      <div className="grid grid-4">
-        <Input label="من تاريخ" type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} />
-        <Input label="إلى تاريخ" type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} />
-        <Select label="نوع الحركة" value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as 'all' | 'income' | 'expense')}>
-          <option value="all">الكل</option>
-          <option value="income">إيرادات فقط</option>
-          <option value="expense">مصروفات فقط</option>
-        </Select>
-        <Input label="بحث (تصنيف / وصف / منفذ)" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="مثال: إيجار" />
-      </div>
-    </Card>
+    {tab === 'overview' ? <div className="stack-lg">
+      <div className="grid grid-2"><Card className="stack"><div className="row-between"><div><h2 className="h3">قائمة الدخل</h2><p className="tiny muted">تقيس الأداء التشغيلي، لذلك لا تعد السلفة تكلفة.</p></div><Button type="button" variant="secondary" onClick={printIncomeStatement}>طباعة</Button></div><div className="table-wrap"><table style={{ minWidth: 0 }}><tbody><tr><td>الإيرادات التشغيلية</td><td style={{ color: 'var(--success)' }}>{money(totals.income)}</td></tr>{expenseBreakdown.slice(0, 4).map((item) => <tr key={item.label}><td className="muted">— {item.label}</td><td>{money(item.amount)}</td></tr>)}<tr><td><strong>إجمالي تكلفة التشغيل</strong></td><td style={{ color: 'var(--danger)' }}><strong>{money(totals.operatingCosts)}</strong></td></tr><tr><td><strong>صافي الربح / الخسارة</strong></td><td><strong style={{ color: totals.netProfit >= 0 ? 'var(--success)' : 'var(--danger)' }}>{money(totals.netProfit)}</strong></td></tr></tbody></table></div></Card>
+      <Card className="stack"><div className="row-between"><div><h2 className="h3">التدفق النقدي</h2><p className="tiny muted">يسجل كل النقد الداخل والخارج، ومنها السلف.</p></div><Button type="button" variant="secondary" onClick={printCashFlow}>طباعة</Button></div><div className="table-wrap"><table style={{ minWidth: 0 }}><tbody><tr><td>رصيد افتتاحي</td><td>{money(openingBalance)}</td></tr><tr><td>نقد داخل</td><td style={{ color: 'var(--success)' }}>+ {money(totals.cashIncome)}</td></tr><tr><td>نقد خارج</td><td style={{ color: 'var(--danger)' }}>− {money(totals.cashOut)}</td></tr><tr><td className="muted">منه سلف مصروفة</td><td>{money(totals.advances)}</td></tr><tr><td><strong>الرصيد الجاري</strong></td><td><strong>{money(openingBalance + totals.cashNet)}</strong></td></tr></tbody></table></div></Card></div>
+      <Card className="stack"><div className="row-between"><div><h2 className="h3">إشارات تحتاج متابعة</h2><p className="muted small">نظرة سريعة على أرصدة الموظفين واستحقاقات التحصيل.</p></div><Badge tone="info">{advances.filter((item) => item.advancesOutstanding > 0).length + outstandingDeductions.length + collectorTotals.filter((item) => item.due > item.paid).length}</Badge></div><div className="grid grid-3"><div className="soft card compact"><strong>سلف قائمة</strong><div className="kpi-value">{money(advances.reduce((sum, item) => sum + item.advancesOutstanding, 0))}</div><p className="tiny muted">تُخصم فقط عند تسجيل صرف راتب.</p><Button type="button" variant="ghost" onClick={() => setTab('advances')}>مراجعة السلف ←</Button></div><div className="soft card compact"><strong>خصومات بانتظار الصرف</strong><div className="kpi-value">{money(outstandingDeductions.reduce((sum, item) => sum + valueOf(item.amount) - valueOf(item.applied_amount), 0))}</div><p className="tiny muted">لا تُعد مصروفاً؛ تظهر فقط للاعتماد عند صرف راتب الموظف.</p><Button type="button" variant="ghost" onClick={() => setTab('deductions')}>مراجعة الخصومات ←</Button></div><div className="soft card compact"><strong>عمولات مستحقة تقديرياً</strong><div className="kpi-value">{money(collectorTotals.reduce((sum, item) => sum + Math.max(0, item.due - item.paid), 0))}</div><p className="tiny muted">تُحسب من تحصيل الفترة حسب القواعد الفعالة.</p><Button type="button" variant="ghost" onClick={() => setTab('commissions')}>مراجعة العمولات ←</Button></div></div></Card>
+    </div> : null}
 
-    <div className="tabs" style={{ marginBottom: 18 }}>
-      <button className={`tab ${tab === 'ledger' ? 'active' : ''}`} onClick={() => setTab('ledger')}>📒 الدفتر العام</button>
-      <button className={`tab ${tab === 'analysis' ? 'active' : ''}`} onClick={() => setTab('analysis')}>📈 التحليل والقوائم</button>
-      <button className={`tab ${tab === 'staff' ? 'active' : ''}`} onClick={() => setTab('staff')}>🧑‍💼 الموظفون والرواتب</button>
-      <button className={`tab ${tab === 'commissions' ? 'active' : ''}`} onClick={() => setTab('commissions')}>🤝 العمولات</button>
-      <button className={`tab ${tab === 'years' ? 'active' : ''}`} onClick={() => setTab('years')}>📆 السنة المالية</button>
-      <button className={`tab ${tab === 'reports' ? 'active' : ''}`} onClick={() => setTab('reports')}>🖨 التقارير</button>
-    </div>
+    {tab === 'ledger' ? <Card className="stack"><div className="row-between"><div><h2 className="h3">الدفتر العام</h2><p className="muted small">الأحدث يظهر أولاً افتراضياً؛ الرصيد الجاري محسوب زمنياً من النقد الفعلي وليس من تكلفة التشغيل.</p></div><div className="row"><Button type="button" variant="secondary" onClick={() => startManual('income')}>+ إيراد يدوي</Button><Button type="button" onClick={() => startManual('expense')}>+ مصروف</Button></div></div><Notice tone="info">إيراد تحصيل الطلاب يظهر تلقائياً بعد تسجيل الدفعة. ويمكنك إضافة إيرادات أخرى يدوياً عند الحاجة، مع تصنيف واضح لتجنب التكرار.</Notice>{runningRows.length === 0 ? <EmptyState title="لا توجد حركات في الفترة" body="أضف إيراداً أو مصروفاً، أو غيّر الفترة المحددة." /> : <div className="table-wrap"><table><thead><tr><th><span className="ledger-date-sort">التاريخ <button type="button" className="ledger-sort-toggle" onClick={() => setLedgerOrder((current) => current === 'newest' ? 'oldest' : 'newest')} title={ledgerOrder === 'newest' ? 'الأحدث أولاً — اضغط لعرض الأقدم أولاً' : 'الأقدم أولاً — اضغط لعرض الأحدث أولاً'} aria-label={ledgerOrder === 'newest' ? 'الأحدث أولاً، عكس ترتيب التاريخ' : 'الأقدم أولاً، عكس ترتيب التاريخ'}>{ledgerOrder === 'newest' ? '↓' : '↑'}</button></span></th><th>الحركة</th><th>البند</th><th>التفاصيل</th><th>النقد</th><th>الرصيد</th><th>الأثر</th><th>إجراء</th></tr></thead><tbody>{runningRows.map((row) => <tr key={row.id}><td>{formatDate(row.occurred_on)}</td><td><Badge tone={ledgerTone(row.kind)}>{row.kind === 'income' ? 'إيراد' : 'مصروف'}</Badge></td><td><strong>{LEDGER_ENTRY_LABEL[row.entry_type]}</strong><br /><span className="tiny muted">{row.category}</span></td><td className="small">{row.description || '—'}{valueOf(row.advance_applied) > 0 ? <div className="tiny">سلفة مخصومة: {money(valueOf(row.advance_applied))}</div> : null}{valueOf(row.deduction) > 0 ? <div className="tiny">خصم: {money(valueOf(row.deduction))}</div> : null}</td><td style={{ color: row.kind === 'income' ? 'var(--success)' : 'var(--danger)' }}><strong>{row.kind === 'income' ? '+' : '−'}{money(valueOf(row.amount))}</strong></td><td>{money(row.balance)}</td><td><Badge tone={row.entry_type === 'advance' ? 'info' : row.affects_profit === false ? 'default' : 'success'}>{row.entry_type === 'advance' ? 'سلفة / ذمم' : row.affects_profit === false ? 'نقد فقط' : 'تشغيلي'}</Badge></td><td><div className="row"><Button type="button" variant="ghost" onClick={() => printLedgerEntry(row)}>طباعة</Button>{row.entry_type === 'payment_collection' || row.source_payment_id ? <span className="tiny muted">من التحصيل</span> : <Button type="button" variant="ghost" onClick={() => openLedgerEdit(row)}>تعديل</Button>}</div></td></tr>)}</tbody></table></div>}</Card> : null}
 
-    {tab === 'ledger' ? (
-      <Card className="stack">
-        <div className="row-between">
-          <h2 className="h3">سجل الحركات المالية</h2>
-          <Button type="button" onClick={() => { setExpenseDirty(false); setError(null); setExpenseOpen(true); }}>+ تسجيل مصروف</Button>
-        </div>
-        <Notice tone="info">مصدر الإيراد الوحيد هو «تحصيل الطلاب» ويُسجل تلقائياً من قسم المدفوعات — هذا يمنع تكرار الإيرادات محاسبياً. جميع حركات الفترة: {filteredRows.length}</Notice>
-        {runningRows.length === 0 ? <EmptyState title="لا توجد حركات في الفترة" /> : (
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>التاريخ</th><th>النوع</th><th>البند</th><th>التفاصيل</th><th>المبلغ</th><th>الرصيد الجاري</th><th>المصدر</th></tr></thead>
-              <tbody>
-                {runningRows.map((r) => (
-                  <tr key={r.id}>
-                    <td>{formatDate(r.occurred_on)}</td>
-                    <td><Badge tone={toneFor(r.kind)}>{r.kind === 'income' ? 'إيراد' : 'مصروف'}</Badge></td>
-                    <td>{ENTRY_LABEL[r.entry_type] ?? r.entry_type}</td>
-                    <td><span className="muted small">{r.category}{r.description ? ` — ${r.description}` : ''}{r.deduction ? ` · خصم ${formatMoney(r.deduction)}` : ''}</span></td>
-                    <td><strong style={{ color: r.kind === 'income' ? 'var(--success)' : 'var(--danger)' }}>{r.kind === 'income' ? '+' : '−'}{formatMoney(r.amount)}</strong></td>
-                    <td>{formatMoney(r.balance)}</td>
-                    <td>{r.source_payment_id ? 'دفعة طالب' : r.created_by_name || staffName.get(r.employee_id ?? '') || 'يدوي'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+
+    {tab === 'payroll' ? <section className="staff-payroll-workspace stack-lg">
+      <Card className="payroll-run-header">
+        <div><span className="payroll-run-kicker">مسير مستقل لكل شهر</span><h2 className="h2">مسير رواتب {monthLabel(payrollPeriod)}</h2><p className="muted">يعرض هذا المسير عمليات الشهر المحدد فقط. يمكن اعتماد رصيدٍ متبقٍ مرحّل من سلفة أو خصم، ويُسجّل الجزء المعتمد كتسوية جديدة في هذا الشهر دون استيراد حركاته القديمة.</p></div>
+        <div className="payroll-run-actions"><Input label="شهر المسير" type="month" value={payrollPeriod} onChange={(event) => setPayrollPeriod(event.target.value || todayIso().slice(0, 7))} /><Button type="button" variant="secondary" onClick={printMonthlyPayroll}>🖨 طباعة المسير</Button><Button type="button" onClick={() => { preparePayroll(staff[0]?.id ?? ''); setPayrollDirty(false); setError(null); setPayrollOpen(true); }}>+ صرف راتب</Button></div>
       </Card>
-    ) : null}
-
-    {tab === 'analysis' ? (
-      <>
-        <div className="grid grid-2" style={{ marginBottom: 18 }}>
-          <Card className="stack">
-            <h2 className="h3">قائمة الدخل</h2>
-            <div className="table-wrap">
-              <table style={{ minWidth: 0 }}>
-                <thead><tr><th>البند</th><th>القيمة</th></tr></thead>
-                <tbody>
-                  <tr><td>الإيرادات (تحصيل الطلاب)</td><td><strong style={{ color: 'var(--success)' }}>{money(totals.income)}</strong></td></tr>
-                  {expenseBreakdown.map((b) => (
-                    <tr key={b.label}><td style={{ paddingInlineStart: 26 }}>{b.label}</td><td>{money(b.value)}</td></tr>
-                  ))}
-                  <tr><td><strong>إجمالي المصروفات</strong></td><td><strong style={{ color: 'var(--danger)' }}>{money(totals.expense)}</strong></td></tr>
-                  <tr><td><strong>صافي الربح / الخسارة</strong></td><td><strong style={{ color: net >= 0 ? 'var(--accent)' : 'var(--danger)' }}>{money(net)}</strong></td></tr>
-                </tbody>
-              </table>
-            </div>
-          </Card>
-          <Card className="stack">
-            <h2 className="h3">كشف التدفق النقدي</h2>
-            <div className="table-wrap">
-              <table style={{ minWidth: 0 }}>
-                <thead><tr><th>البند</th><th>القيمة</th></tr></thead>
-                <tbody>
-                  <tr><td>الرصيد الافتتاحي ({openYear?.year_label ?? 'السنة الحالية'})</td><td>{money(opening)}</td></tr>
-                  <tr><td>إجمالي الإيرادات</td><td style={{ color: 'var(--success)' }}>+ {money(totals.income)}</td></tr>
-                  <tr><td>إجمالي المصروفات</td><td style={{ color: 'var(--danger)' }}>− {money(totals.expense)}</td></tr>
-                  <tr><td><strong>الرصيد الختامي</strong></td><td><strong>{money(closingBalance)}</strong></td></tr>
-                </tbody>
-              </table>
-            </div>
-          </Card>
-        </div>
-
-        <Card className="stack">
-          <div className="row-between">
-            <h2 className="h3">توزيع المصروفات حسب النوع</h2>
-            <Badge tone="info">{expenseBreakdown.length} نوع</Badge>
-          </div>
-          {expenseBreakdown.length === 0 ? <EmptyState title="لا توجد مصروفات في الفترة" /> : (
-            <div className="expense-bars">
-              {expenseBreakdown.map((b) => {
-                const pct = totals.expense > 0 ? Math.round((b.value / totals.expense) * 100) : 0;
-                return (
-                  <div key={b.label} className="expense-bar-row">
-                    <div className="row-between"><span className="small">{b.label}</span><span className="small muted">{money(b.value)} · {pct}%</span></div>
-                    <div className="expense-bar-track"><div className="expense-bar-fill" style={{ width: `${pct}%` }} /></div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Card>
-      </>
-    ) : null}
-
-    {tab === 'staff' ? (
-      <>
-        <Card className="stack">
-          <div className="row-between"><h2 className="h3">كشف الرواتب والسلفيات والخصومات</h2><Badge tone="info">{payroll.length} موظف</Badge></div>
-          {payroll.length === 0 ? <EmptyState title="لا توجد حركات رواتب في الفترة" body="سجّل راتباً أو سلفة من الدفتر العام وستظهر تفاصيل الموظف هنا فوراً." /> : (
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>الموظف</th><th>الدور</th><th>الراتب</th><th>السلفيات</th><th>المكافآت/العمولات</th><th>الخصومات</th><th>الصافي المستحق</th><th></th></tr></thead>
-                <tbody>
-                  {payroll.map((p) => (
-                    <tr key={p.id}>
-                      <td><strong>{p.full_name}</strong></td>
-                      <td>{roleLabel(p.role)}</td>
-                      <td>{formatMoney(p.salary)}</td>
-                      <td style={{ color: 'var(--danger)' }}>{formatMoney(p.advance)}</td>
-                      <td>{formatMoney(p.bonus)}</td>
-                      <td style={{ color: 'var(--danger)' }}>{formatMoney(p.deduction)}</td>
-                      <td><strong style={{ color: 'var(--accent)' }}>{formatMoney(p.net)}</strong></td>
-                      <td><Button type="button" variant="secondary" onClick={() => printPayroll(p)}>كشف PDF</Button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-        <Card className="stack" style={{ marginTop: 18 }}>
-          <h2 className="h3">تحصيل الموظفين في الفترة</h2>
-          {collectorTotals.length === 0 ? <EmptyState title="لا يوجد تحصيل موظفين في الفترة" /> : (
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>الموظف</th><th>إجمالي التحصيل</th><th>نسبة العمولة</th><th>قيمة العمولة</th></tr></thead>
-                <tbody>
-                  {collectorTotals.map((c) => (
-                    <tr key={c.id}><td>{c.name}</td><td>{formatMoney(c.total)}</td><td>{c.rate}%</td><td><strong>{formatMoney(c.commission)}</strong></td></tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-      </>
-    ) : null}
-
-    {tab === 'commissions' ? (
+      <div className="grid grid-4 payroll-run-kpis"><Card className="compact kpi"><span className="muted">الأساسي المسجل</span><div className="kpi-value">{money(payroll.reduce((sum, item) => sum + item.baseSalary, 0))}</div></Card><Card className="compact kpi"><span className="muted">إضافات وعمولات</span><div className="kpi-value">{money(payroll.reduce((sum, item) => sum + item.bonuses + item.commissions, 0))}</div></Card><Card className="compact kpi"><span className="muted">تسويات سلف وخصومات</span><div className="kpi-value">{money(payroll.reduce((sum, item) => sum + item.advancesApplied + item.deductions, 0))}</div></Card><Card className="compact kpi"><span className="muted">صافي النقد المصروف</span><div className="kpi-value" style={{ color: 'var(--success)' }}>{money(payroll.reduce((sum, item) => sum + item.cashPaid, 0))}</div></Card></div>
       <Card className="stack">
-        <div className="row-between"><h2 className="h3">قواعد عمولات التحصيل</h2><Button type="button" variant="secondary" onClick={() => { setCommissionDirty(false); setError(null); setCommissionOpen(true); }}>+ قاعدة عمولة</Button></div>
-        {rules.length === 0 ? <EmptyState title="لا توجد قواعد عمولة" body="حدد نسبة لكل موظف من تحصيلاته حتى تُحتسب عمولته آلياً." /> : (
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>الموظف</th><th>النسبة</th><th>تبدأ</th><th>تنتهي</th><th>الحالة</th></tr></thead>
-              <tbody>
-                {rules.map((r) => (
-                  <tr key={r.id}><td>{staffName.get(r.staff_id) ?? r.staff_id}</td><td>{r.rate}%</td><td>{formatDate(r.starts_on)}</td><td>{r.ends_on ? formatDate(r.ends_on) : 'مفتوحة'}</td><td><Badge tone={r.is_active ? 'success' : 'default'}>{r.is_active ? 'مفعلة' : 'موقوفة'}</Badge></td></tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
+        <div className="row-between"><div><h3 className="h3">موظفو مسير {monthLabel(payrollPeriod)}</h3><p className="muted small">كل موظف له ملخص مستقل للشهر. الأرصدة الأقدم لا تدخل في أرقام هذا الجدول.</p></div><Badge tone="info">{payroll.filter((item) => item.salaryPayments > 0).length} صرف راتب</Badge></div>
+        <Notice tone="info">نافذة صرف الراتب تعرض فقط الأرصدة المتبقية غير المسددة، بما فيها الرصيد المرحّل. عند اعتماد جزء منها يظهر في مسير {monthLabel(payrollPeriod)} كتسوية هذا الشهر فقط، مع الاحتفاظ بمصدر الذمة وتاريخها.</Notice>
+        {staff.length === 0 ? <EmptyState title="لا يوجد موظفون نشطون" /> : <div className="table-wrap"><table><thead><tr><th>الموظف</th><th>الأساسي</th><th>الإضافات / العمولة</th><th>سلفة هذا الشهر</th><th>تسويات</th><th>صافي المصروف</th><th>الحالة</th><th>إجراء</th></tr></thead><tbody>{payroll.map((entry) => <tr key={entry.id}><td><strong>{entry.full_name}</strong><br /><span className="tiny muted">{roleLabel(entry.role)}</span></td><td>{money(entry.baseSalary)}</td><td>{money(entry.bonuses + entry.commissions)}</td><td style={{ color: entry.outstandingAdvance > 0 ? 'var(--danger)' : undefined }}>{money(entry.advancesOutstanding)}</td><td><span className="small">سلفة: {money(entry.advancesApplied)}</span><br /><span className="small">خصم: {money(entry.deductions)}</span></td><td><strong>{money(entry.cashPaid)}</strong></td><td><Badge tone={entry.salaryPayments ? 'success' : 'default'}>{entry.salaryPayments ? `${entry.salaryPayments} صرف` : 'لم يصرف'}</Badge>{entry.openMonthDeductions > 0 ? <div className="tiny" style={{ color: 'var(--danger)', marginTop: 4 }}>خصم معلق: {money(entry.openMonthDeductions)}</div> : null}</td><td><div className="row"><Button type="button" variant="ghost" onClick={() => { preparePayroll(entry.id); setPayrollDirty(false); setError(null); setPayrollOpen(true); }}>صرف</Button><Button type="button" variant="ghost" onClick={() => printEmployeeStatement(entry.id)}>كشف</Button></div></td></tr>)}</tbody></table></div>}
       </Card>
-    ) : null}
+      <Card className="staff-statement-card stack"><div className="row-between"><div><span className="payroll-run-kicker">كشف منظم وقابل للطباعة</span><h3 className="h3">كشف حساب الموظف</h3><p className="tiny muted">اختر كشف مسير الشهر أو السجل الكامل؛ كلاهما يفصل الرواتب والسلف والعمولات والخصومات بوضوح.</p></div><Button type="button" variant="secondary" disabled={!statementEmployeeId} onClick={() => printEmployeeStatement(statementEmployeeId)}>🖨 طباعة الكشف</Button></div><div className="grid grid-2"><Select label="الموظف" value={statementEmployeeId} onChange={(event) => setStatementEmployeeId(event.target.value)}><option value="">اختر الموظف لإصدار كشف حسابه</option>{staff.map((employee) => <option key={employee.id} value={employee.id}>{employee.full_name} — {roleLabel(employee.role)}</option>)}</Select><Select label="نطاق الكشف" value={statementScope} onChange={(event) => setStatementScope(event.target.value as StatementScope)}><option value="month">مسير {monthLabel(payrollPeriod)}</option><option value="all">كشف شامل من بداية التعامل</option></Select></div></Card>
+    </section> : null}
 
-    {tab === 'years' ? (
-      <Card className="stack">
-        <div className="row-between">
-          <h2 className="h3">السنة المالية</h2>
-          {years.some((y) => y.status === 'open') ? (
-            <Button type="button" variant="secondary" disabled={closing} onClick={closeYear}>{closing ? 'جارٍ الإغلاق...' : 'إغلاق السنة وفتح سنة جديدة'}</Button>
-          ) : null}
-        </div>
-        {years.length === 0 ? <EmptyState title="لا توجد سنوات مالية" body="تُنشأ السنة المالية تلقائياً مع إنشاء السنتر." /> : (
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>السنة</th><th>تبدأ</th><th>تنتهي</th><th>الحالة</th><th>رصيد افتتاحي</th><th>إيرادات</th><th>مصروفات</th><th>رصيد الختام</th><th>مستحقات معلقة</th></tr></thead>
-              <tbody>
-                {years.map((y) => (
-                  <tr key={y.id}>
-                    <td><strong>{y.year_label}</strong></td>
-                    <td>{formatDate(y.starts_on)}</td>
-                    <td>{y.ends_on ? formatDate(y.ends_on) : '—'}</td>
-                    <td><Badge tone={y.status === 'open' ? 'success' : 'default'}>{y.status === 'open' ? 'مفتوحة' : 'مغلقة'}</Badge></td>
-                    <td>{formatMoney(y.opening_balance)}</td>
-                    <td>{y.closing_income === null ? '—' : formatMoney(y.closing_income)}</td>
-                    <td>{y.closing_expense === null ? '—' : formatMoney(y.closing_expense)}</td>
-                    <td><strong>{y.closing_balance === null ? '—' : formatMoney(y.closing_balance)}</strong></td>
-                    <td>{y.closing_pending_dues === null ? '—' : formatMoney(y.closing_pending_dues)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-    ) : null}
+    {tab === 'deductions' ? <section className="staff-payroll-workspace stack-lg">
+      <Card className="staff-period-header"><div><span className="payroll-run-kicker">ذمم الموظفين وتتبع التسوية</span><h2 className="h2">خصومات {monthLabel(payrollPeriod)}</h2><p className="muted">يعرض السجل الخصومات التي أُنشئت في الشهر، وتعرض بطاقة التسويات كل جزء خُصم فعلياً من راتب هذا الشهر، ولو كان مصدره شهراً سابقاً.</p></div><div className="payroll-run-actions"><Input label="الشهر" type="month" value={payrollPeriod} onChange={(event) => setPayrollPeriod(event.target.value || todayIso().slice(0, 7))} /><Button type="button" onClick={() => { setDeductionEditId(null); setDeductionForm({ employee_id: staff[0]?.id ?? '', amount: '', reason: '', notes: '', occurred_on: dateForPeriod(payrollPeriod) }); setDeductionDirty(false); setError(null); setDeductionOpen(true); }}>+ تسجيل خصم</Button></div></Card>
+      <div className="grid grid-3 payroll-run-kpis"><Card className="compact kpi"><span className="muted">خصومات أُنشئت هذا الشهر</span><div className="kpi-value">{money(payrollDeductions.reduce((sum, item) => sum + valueOf(item.amount), 0))}</div></Card><Card className="compact kpi"><span className="muted">سُوّي من راتب الشهر</span><div className="kpi-value">{money(monthlyDeductionSettlements.reduce((sum, item) => sum + valueOf(item.amount), 0))}</div></Card><Card className="compact kpi"><span className="muted">معلق من تسجيلات الشهر</span><div className="kpi-value" style={{ color: 'var(--danger)' }}>{money(payrollDeductions.reduce((sum, item) => sum + Math.max(0, valueOf(item.amount) - valueOf(item.applied_amount)), 0))}</div></Card></div>
+      <Card className="stack"><div className="row-between"><div><h3 className="h3">سجل خصومات الشهر</h3><p className="muted small">مصادر الذمم التي سُجلت داخل الشهر؛ لا يدمج سجلات الأشهر الأخرى.</p></div><Badge tone={payrollDeductions.length ? 'warn' : 'default'}>{payrollDeductions.length} عنصر</Badge></div>{payrollDeductions.length === 0 ? <EmptyState title={`لا توجد خصومات مسجلة في ${monthLabel(payrollPeriod)}`} body="يمكنك إضافة خصم، أو تسوية رصيد مرحّل من شاشة صرف الراتب." /> : <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>السبب</th><th>إجمالي الخصم</th><th>المتبقي الآن</th><th>الحالة</th><th></th></tr></thead><tbody>{payrollDeductions.map((item) => { const remaining = Math.max(0, valueOf(item.amount) - valueOf(item.applied_amount)); return <tr key={item.id}><td>{formatDate(item.occurred_on)}</td><td><strong>{staffName.get(item.staff_id) ?? 'موظف'}</strong></td><td>{item.reason}<br />{item.notes ? <span className="tiny muted">{item.notes}</span> : null}</td><td>{money(valueOf(item.amount))}</td><td><strong style={{ color: remaining > 0 ? 'var(--danger)' : 'var(--success)' }}>{money(remaining)}</strong></td><td><Badge tone={item.status === 'settled' ? 'success' : item.status === 'partial' ? 'warn' : 'info'}>{item.status === 'settled' ? 'مُعالج' : item.status === 'partial' ? 'معالج جزئياً' : 'بانتظار الصرف'}</Badge></td><td><div className="row">{remaining > 0 ? <Button type="button" variant="ghost" onClick={() => { preparePayroll(item.staff_id); setPayrollDirty(false); setError(null); setPayrollOpen(true); }}>صرف راتب</Button> : <Button type="button" variant="ghost" onClick={() => printEmployeeStatement(item.staff_id)}>كشف</Button>}<Button type="button" variant="ghost" onClick={() => { setDeductionEditId(item.id); setDeductionForm({ employee_id: item.staff_id, amount: String(valueOf(item.amount)), reason: item.reason, notes: item.notes, occurred_on: item.occurred_on }); setDeductionDirty(false); setError(null); setDeductionOpen(true); }}>تعديل</Button></div></td></tr>; })}</tbody></table></div>}</Card>
+      <Card className="stack"><div className="row-between"><div><h3 className="h3">تسويات الخصومات وعجز العهدة في {monthLabel(payrollPeriod)}</h3><p className="muted small">كل صف يربط الخصم أو عجز العهدة بمبلغ وتاريخ ومسير الراتب الذي عالجه.</p></div><Badge tone={monthlyDeductionSettlements.length ? 'success' : 'default'}>{monthlyDeductionSettlements.length} تسوية</Badge></div>{monthlyDeductionSettlements.length === 0 ? <EmptyState title={`لا توجد تسويات خصومات في ${monthLabel(payrollPeriod)}`} body="تظهر هنا فقط الأجزاء المعتمدة مع رواتب هذا الشهر." /> : <div className="table-wrap"><table><thead><tr><th>تاريخ التسوية</th><th>الموظف</th><th>مصدر الذمة</th><th>تاريخ المصدر</th><th>المبلغ المسوّى</th><th>مسير الراتب</th><th>كشف</th></tr></thead><tbody>{monthlyDeductionSettlements.map((item) => { const source = deductions.find((deduction) => deduction.id === item.deduction_id); const salary = rows.find((row) => row.id === item.salary_ledger_id); return <tr key={item.id}><td>{formatDate(item.settled_on)}</td><td>{staffName.get(item.staff_id) ?? 'موظف'}</td><td>{source?.reason ?? 'خصم'}{source?.notes ? <div className="tiny muted">{source.notes}</div> : null}</td><td>{source ? formatDate(source.occurred_on) : '—'}</td><td><strong>{money(valueOf(item.amount))}</strong></td><td>{salary ? `${monthLabel(monthKey(salary.occurred_on))} · ${formatDate(salary.occurred_on)}` : monthLabel(`${item.period_year}-${String(item.period_month).padStart(2, '0')}`)}</td><td><Button type="button" variant="ghost" onClick={() => printEmployeeStatement(item.staff_id)}>كشف الموظف</Button></td></tr>; })}</tbody></table></div>}</Card>
+      <Notice tone="info">الخصم لا يُسجل مصروفاً. عند وجود رصيد مرحّل يظهر في نافذة «صرف راتب» كرصيد متبقٍ فقط؛ تستطيع اختيار عناصره وتخفيض مبلغ التسوية، ثم يُحفظ الأثر بهذا الشهر.</Notice>
+    </section> : null}
 
-    {tab === 'reports' ? (
-      <div className="grid grid-2">
-        <Card className="stack">
-          <h2 className="h3">التقارير المالية الجاهزة</h2>
-          <div className="stack">
-            <div className="row-between"><span>التقرير المالي الشامل (ملخص + تحصيل الموظفين + الحركات)</span><Button type="button" variant="secondary" onClick={printFinancial}>طباعة</Button></div>
-            <div className="row-between"><span>قائمة الدخل (إيرادات − مصروفات = صافي)</span><Button type="button" variant="secondary" onClick={printIncomeStatement}>طباعة</Button></div>
-            <div className="row-between"><span>كشف التدفق النقدي (افتتاحي + حركة = ختامي)</span><Button type="button" variant="secondary" onClick={printCashFlow}>طباعة</Button></div>
-            <div className="row-between"><span>قائمة الرواتب لجميع الموظفين</span><Button type="button" variant="secondary" onClick={() => printReport(buildReportHtml('قائمة الرواتب', `${fromDate || 'البداية'} — ${toDate || 'اليوم'}`, [{ title: 'الرواتب', headers: ['الموظف', 'الدور', 'الراتب', 'السلف', 'المكافآت', 'الخصومات', 'الصافي'], rows: payroll.map((p) => [p.full_name, roleLabel(p.role), formatMoney(p.salary), formatMoney(p.advance), formatMoney(p.bonus), formatMoney(p.deduction), formatMoney(p.net)]) }], { name: profile?.full_name }))}>طباعة</Button></div>
-          </div>
-        </Card>
-        <Card className="stack">
-          <h2 className="h3">ملاحظات</h2>
-          <Notice>كل التقارير تُطبع بنافذة طباعة المتصفح وتُحفظ PDF مباشرة — تعمل دون الحاجة للسماح بالنوافذ المنبثقة.</Notice>
-          <Notice tone="info">فترة التقرير الحالية: {fromDate || 'البداية'} — {toDate || 'اليوم'}. استخدم حقول الفلترة بالأعلى لتغيير النطاق.</Notice>
-        </Card>
-      </div>
-    ) : null}
+    {tab === 'advances' ? <section className="staff-payroll-workspace stack-lg">
+      <Card className="staff-period-header"><div><span className="payroll-run-kicker">ذمم سلف ومتابعة تسويات</span><h2 className="h2">سلفيات {monthLabel(payrollPeriod)}</h2><p className="muted">يعرض القسم السلف التي صُرفت خلال الشهر، والتسويات التي تمت في رواتب الشهر حتى إن كانت لسلف سابقة. لا يدمج قيمة السلفة القديمة في مسير جديد.</p></div><div className="payroll-run-actions"><Input label="الشهر" type="month" value={payrollPeriod} onChange={(event) => setPayrollPeriod(event.target.value || todayIso().slice(0, 7))} /><Button type="button" onClick={() => { setAdvanceForm({ employee_id: staff[0]?.id ?? '', amount: '', occurred_on: dateForPeriod(payrollPeriod), description: '' }); setAdvanceDirty(false); setError(null); setAdvanceOpen(true); }}>+ صرف سلفة</Button></div></Card>
+      <div className="grid grid-3 payroll-run-kpis"><Card className="compact kpi"><span className="muted">سلف صُرفت هذا الشهر</span><div className="kpi-value">{money(monthlyAdvances.reduce((sum, item) => sum + item.advancesIssued, 0))}</div></Card><Card className="compact kpi"><span className="muted">سُوّي من رواتب الشهر</span><div className="kpi-value">{money(monthlyAdvanceSettlements.reduce((sum, item) => sum + valueOf(item.amount), 0))}</div></Card><Card className="compact kpi"><span className="muted">ذمم نشأت هذا الشهر</span><div className="kpi-value" style={{ color: 'var(--danger)' }}>{money(monthlyAdvances.reduce((sum, item) => sum + item.advancesOutstanding, 0))}</div></Card></div>
+      <Card className="stack"><div className="row-between"><div><h3 className="h3">حركة السلف المنشأة في الشهر</h3><p className="muted small">يقتصر هذا الجدول على أصل السلفة وحركة راتب الشهر، من دون عرض مصادر الأشهر السابقة.</p></div><Badge tone="info">{monthlyAdvances.length} موظف</Badge></div>{monthlyAdvances.length === 0 ? <EmptyState title={`لا توجد سلف أو تسويات سلف في ${monthLabel(payrollPeriod)}`} body="يمكنك صرف سلفة أو تسوية رصيد مرحّل من نافذة صرف الراتب." /> : <div className="table-wrap"><table><thead><tr><th>الموظف</th><th>صُرف هذا الشهر</th><th>سُوّي مع راتب الشهر</th><th>متبقي من سلف الشهر</th><th>آخر حركة في الشهر</th><th>إجراء</th></tr></thead><tbody>{monthlyAdvances.map((entry) => { const last = payrollRows.filter((row) => row.employee_id === entry.id && (row.entry_type === 'advance' || row.entry_type === 'salary')).sort((a, b) => b.occurred_on.localeCompare(a.occurred_on) || b.created_at.localeCompare(a.created_at))[0]; return <tr key={entry.id}><td><strong>{entry.full_name}</strong><br /><span className="tiny muted">{roleLabel(entry.role)}</span></td><td>{money(entry.advancesIssued)}</td><td>{money(entry.advancesApplied)}</td><td><strong style={{ color: entry.advancesOutstanding > 0 ? 'var(--danger)' : 'var(--success)' }}>{money(entry.advancesOutstanding)}</strong></td><td>{last ? formatDate(last.occurred_on) : '—'}</td><td><Button type="button" variant="ghost" onClick={() => { preparePayroll(entry.id); setPayrollDirty(false); setError(null); setPayrollOpen(true); }}>صرف راتب</Button></td></tr>; })}</tbody></table></div>}</Card>
+      <Card className="stack"><div className="row-between"><div><h3 className="h3">تفاصيل تسويات السلف في {monthLabel(payrollPeriod)}</h3><p className="muted small">يربط كل سطر السلفة الأصلية بالراتب الذي سدد منها، فتظهر الدفعات الجزئية ومواعيدها بوضوح.</p></div><Badge tone={monthlyAdvanceSettlements.length ? 'success' : 'default'}>{monthlyAdvanceSettlements.length} تسوية</Badge></div>{monthlyAdvanceSettlements.length === 0 ? <EmptyState title={`لا توجد تسويات سلف في ${monthLabel(payrollPeriod)}`} body="تظهر هنا فقط الأجزاء التي خُصمت من رواتب هذا الشهر." /> : <div className="table-wrap"><table><thead><tr><th>تاريخ التسوية</th><th>الموظف</th><th>تاريخ السلفة</th><th>مبلغ السلفة الأصلي</th><th>الجزء المسوّى</th><th>راتب التسوية</th><th>كشف</th></tr></thead><tbody>{monthlyAdvanceSettlements.map((item) => { const source = rows.find((row) => row.id === item.advance_ledger_id); const salary = rows.find((row) => row.id === item.salary_ledger_id); return <tr key={item.id}><td>{formatDate(item.settled_on)}</td><td>{staffName.get(item.staff_id) ?? 'موظف'}</td><td>{source ? formatDate(source.occurred_on) : '—'}</td><td>{source ? money(valueOf(source.amount)) : '—'}</td><td><strong>{money(valueOf(item.amount))}</strong></td><td>{salary ? `${monthLabel(monthKey(salary.occurred_on))} · ${formatDate(salary.occurred_on)}` : monthLabel(`${item.period_year}-${String(item.period_month).padStart(2, '0')}`)}</td><td><Button type="button" variant="ghost" onClick={() => printEmployeeStatement(item.staff_id)}>كشف الموظف</Button></td></tr>; })}</tbody></table></div>}</Card>
+      <Notice tone="info">إجمالي الأرصدة المعلقة من كل الشهور: <strong>{money(advances.reduce((sum, entry) => sum + entry.advancesOutstanding, 0))}</strong>. عند فتح «صرف راتب» تظهر فقط تفاصيل أرصدة السلف المتبقية، ويمكن تسوية جزء منها الآن؛ لا يظهر أصلها ضمن أرقام مسير الشهر إلا عند تنفيذ التسوية.</Notice>
+    </section> : null}
 
-    <Modal
-      open={expenseOpen}
-      title="تسجيل مصروف"
-      subtitle="مصروف عام / راتب / سلفة / مكافأة / إيجار / مرافق / مشتريات"
-      dirty={expenseDirty}
-      onClose={() => setExpenseOpen(false)}
-      onSave={() => void submit({ preventDefault: () => {} } as React.FormEvent)}
-      saveLabel={busy ? 'جاري الحفظ...' : 'حفظ المصروف'}
-      footer={<Button disabled={busy} type="submit" form="expense-form">{busy ? 'جاري الحفظ...' : 'حفظ المصروف'}</Button>}
-    >
-      <form id="expense-form" className="stack" onSubmit={submit}>
-        <div className="grid grid-2">
-          <Select label="نوع المصروف" value={form.entry_type} onChange={(e) => { setForm({ ...form, entry_type: e.target.value as EntryType, category: (EXPENSE_CATEGORIES[e.target.value as EntryType]?.[0] ?? '') }); setExpenseDirty(true); }}>
-            {EXPENSE_TYPES.map((t) => <option key={t} value={t}>{ENTRY_LABEL[t]}</option>)}
-          </Select>
-          {['salary', 'advance', 'bonus'].includes(form.entry_type) ? <Select label="الموظف" value={form.employee_id} onChange={(e) => { setForm({ ...form, employee_id: e.target.value }); setExpenseDirty(true); }}><option value="">اختر الموظف</option>{staff.map((s) => <option key={s.id} value={s.id}>{s.full_name} — {roleLabel(s.role)}</option>)}</Select> : null}
-          <div className="input-wrap">
-            <span className="label">التصنيف</span>
-            <input className="input" list="expense-cats" value={form.category} onChange={(e) => { setForm({ ...form, category: e.target.value }); setExpenseDirty(true); }} required />
-            <datalist id="expense-cats">
-              {(EXPENSE_CATEGORIES[form.entry_type] ?? []).map((c) => <option key={c} value={c} />)}
-            </datalist>
-          </div>
-          <Input label="المبلغ" type="number" value={form.amount} onChange={(e) => { setForm({ ...form, amount: e.target.value }); setExpenseDirty(true); }} required />
-          <Input label="خصم من المستحق (اختياري)" type="number" value={form.deduction} onChange={(e) => { setForm({ ...form, deduction: e.target.value }); setExpenseDirty(true); }} />
-          <Input label="التاريخ" type="date" value={form.occurred_on} onChange={(e) => { setForm({ ...form, occurred_on: e.target.value }); setExpenseDirty(true); }} />
-        </div>
-        <Input label="الوصف (اختياري)" value={form.description} onChange={(e) => { setForm({ ...form, description: e.target.value }); setExpenseDirty(true); }} />
-        <Notice>إيرادات الطلاب تسجل آلياً فقط من قسم التحصيل لمنع ازدواج الإيراد.</Notice>
-        <ErrorNotice error={error} />
-      </form>
-    </Modal>
+    {tab === 'commissions' ? <section className="staff-payroll-workspace stack-lg"><Card className="staff-period-header"><div><span className="payroll-run-kicker">عمولات مرتبطة بالشهر</span><h2 className="h2">عمولات {monthLabel(payrollPeriod)}</h2><p className="muted">التحصيل والاستحقاق والصرف في هذا العرض تخص الشهر المحدد فقط، فلا تختلط عمولة شهر بمسير شهر آخر.</p></div><div className="payroll-run-actions"><Input label="الشهر" type="month" value={payrollPeriod} onChange={(event) => setPayrollPeriod(event.target.value || todayIso().slice(0, 7))} /><Button type="button" onClick={() => { setCommissionPay({ employee_id: staff[0]?.id ?? '', amount: '', occurred_on: dateForPeriod(payrollPeriod), description: '' }); setCommissionPayDirty(false); setError(null); setCommissionPayOpen(true); }}>+ صرف عمولة</Button></div></Card><div className="grid grid-3 payroll-run-kpis"><Card className="compact kpi"><span className="muted">عمولات مستحقة</span><div className="kpi-value">{money(payrollCollectorTotals.reduce((sum, item) => sum + item.due, 0))}</div></Card><Card className="compact kpi"><span className="muted">عمولات مصروفة</span><div className="kpi-value">{money(payrollCollectorTotals.reduce((sum, item) => sum + item.paid, 0))}</div></Card><Card className="compact kpi"><span className="muted">المتبقي التقديري</span><div className="kpi-value" style={{ color: 'var(--danger)' }}>{money(payrollCollectorTotals.reduce((sum, item) => sum + Math.max(0, item.due - item.paid), 0))}</div></Card></div><div className="grid grid-2"><Card className="stack"><div className="row-between"><div><h3 className="h3">قواعد عمولات التحصيل</h3><p className="tiny muted">القاعدة تحدد النسبة، أما كشف الشهر فيحسب التحصيل ضمن شهر المسير فقط.</p></div><Button type="button" variant="secondary" onClick={() => { setRuleForm({ staff_id: staff[0]?.id ?? '', rate: '3', starts_on: dateForPeriod(payrollPeriod), ends_on: '', is_active: true }); setRuleDirty(false); setError(null); setRuleOpen(true); }}>+ قاعدة عمولة</Button></div>{rules.length === 0 ? <EmptyState title="لم تضف قاعدة عمولة بعد" body="حدد نسبة عمولة للمحصل ثم راقب مسير كل شهر." /> : <div className="table-wrap"><table><thead><tr><th>الموظف</th><th>النسبة</th><th>من</th><th>إلى</th><th>الحالة</th></tr></thead><tbody>{rules.map((rule) => <tr key={rule.id}><td>{staffName.get(rule.staff_id) ?? 'موظف'}</td><td>{rule.rate}%</td><td>{formatDate(rule.starts_on)}</td><td>{rule.ends_on ? formatDate(rule.ends_on) : 'مفتوحة'}</td><td><Badge tone={rule.is_active ? 'success' : 'default'}>{rule.is_active ? 'فعالة' : 'موقوفة'}</Badge></td></tr>)}</tbody></table></div>}</Card><Card className="stack"><div><h3 className="h3">ضوابط صرف العمولة</h3><p className="muted small">يمكن صرف العمولة مستقلة أو إضافتها إلى راتب الشهر. كلا الخيارين يبقى موثقاً داخل مسير {monthLabel(payrollPeriod)}.</p></div><Notice tone="info">العمولة ضمن صرف الراتب تسجل في صف الموظف تحت «الإضافات / العمولة»، والصرف المستقل يظهر في كشف العمولات للشهر نفسه.</Notice><Button type="button" onClick={() => { setCommissionPay({ employee_id: staff[0]?.id ?? '', amount: '', occurred_on: dateForPeriod(payrollPeriod), description: '' }); setCommissionPayDirty(false); setError(null); setCommissionPayOpen(true); }}>صرف عمولة مستقلة</Button></Card></div><Card className="stack"><div className="row-between"><div><h3 className="h3">تحصيل وعمولات {monthLabel(payrollPeriod)}</h3><p className="tiny muted">يسجل فقط التحصيل والعمولات التي تاريخها داخل هذا الشهر.</p></div><Badge tone="info">{payrollCollectorTotals.length} موظف</Badge></div>{payrollCollectorTotals.length === 0 ? <EmptyState title={`لا يوجد تحصيل أو عمولات في ${monthLabel(payrollPeriod)}`} /> : <div className="table-wrap"><table><thead><tr><th>الموظف</th><th>المحصل</th><th>النسبة</th><th>المستحق</th><th>المصروف</th><th>المتبقي</th></tr></thead><tbody>{payrollCollectorTotals.map((item) => <tr key={item.id}><td>{item.name}</td><td>{money(item.collected)}</td><td>{item.rate}%</td><td>{money(item.due)}</td><td>{money(item.paid)}</td><td><strong style={{ color: item.due > item.paid ? 'var(--danger)' : 'var(--success)' }}>{money(Math.max(0, item.due - item.paid))}</strong></td></tr>)}</tbody></table></div>}</Card></section> : null}
 
-    <Modal
-      open={commissionOpen}
-      title="قاعدة عمولة تحصيل"
-      subtitle="نسبة يحصل عليها الموظف من تحصيله"
-      dirty={commissionDirty}
-      onClose={() => setCommissionOpen(false)}
-      onSave={() => void saveCommission({ preventDefault: () => {} } as React.FormEvent)}
-      saveLabel="حفظ العمولة"
-      footer={<Button type="submit" form="commission-form">حفظ العمولة</Button>}
-    >
-      <form id="commission-form" className="stack" onSubmit={saveCommission}>
-        <div className="grid grid-2">
-          <Select label="الموظف" value={commission.staff_id} onChange={(e) => { setCommission({ ...commission, staff_id: e.target.value }); setCommissionDirty(true); }}><option value="">اختر الموظف</option>{staff.map((s) => <option key={s.id} value={s.id}>{s.full_name}</option>)}</Select>
-          <Input label="النسبة %" type="number" value={commission.rate} onChange={(e) => { setCommission({ ...commission, rate: e.target.value }); setCommissionDirty(true); }} />
-          <Input label="تبدأ من" type="date" value={commission.starts_on} onChange={(e) => { setCommission({ ...commission, starts_on: e.target.value }); setCommissionDirty(true); }} />
-          <Input label="تنتهي في" type="date" value={commission.ends_on} onChange={(e) => { setCommission({ ...commission, ends_on: e.target.value }); setCommissionDirty(true); }} />
-        </div>
-        <label className="row small muted"><input type="checkbox" checked={commission.is_active} onChange={(e) => { setCommission({ ...commission, is_active: e.target.checked }); setCommissionDirty(true); }} /> العمولة مفعلة</label>
-        <ErrorNotice error={error} />
-      </form>
-    </Modal>
+    {tab === 'custody' ? <CustodyWorkspace embedded onChanged={load} /> : null}
+
+    {tab === 'years' ? <Card className="stack"><div className="row-between"><div><h2 className="h3">السنة المالية</h2><p className="muted small">عند الإغلاق يرحّل النظام الرصيد والمستحقات المعلقة إلى السنة التالية.</p></div>{openYear ? <Button type="button" variant="secondary" disabled={closing} onClick={() => void closeYear()}>{closing ? 'جارٍ الإغلاق…' : 'إغلاق السنة وفتح التالية'}</Button> : null}</div>{years.length === 0 ? <EmptyState title="لا توجد سنة مالية" body="تُنشأ السنة تلقائياً مع تفعيل المحاسبة." /> : <div className="table-wrap"><table><thead><tr><th>السنة</th><th>تبدأ</th><th>تنتهي</th><th>الحالة</th><th>افتتاحي</th><th>إيرادات</th><th>تكلفة تشغيل</th><th>ختامي</th><th>معلق</th></tr></thead><tbody>{years.map((year) => <tr key={year.id}><td><strong>{year.year_label}</strong></td><td>{formatDate(year.starts_on)}</td><td>{year.ends_on ? formatDate(year.ends_on) : '—'}</td><td><Badge tone={year.status === 'open' ? 'success' : 'default'}>{year.status === 'open' ? 'مفتوحة' : 'مغلقة'}</Badge></td><td>{money(valueOf(year.opening_balance))}</td><td>{year.closing_income === null ? '—' : money(valueOf(year.closing_income))}</td><td>{year.closing_expense === null ? '—' : money(valueOf(year.closing_expense))}</td><td>{year.closing_balance === null ? '—' : money(valueOf(year.closing_balance))}</td><td>{year.closing_pending_dues === null ? '—' : money(valueOf(year.closing_pending_dues))}</td></tr>)}</tbody></table></div>}</Card> : null}
+
+    {tab === 'reports' ? <div className="grid grid-2"><Card className="stack"><h2 className="h3">تقارير قابلة للطباعة PDF</h2><p className="muted">الفترة الحالية: {fromDate || 'البداية'} — {toDate || 'اليوم'}. كل تقرير يفتح مربع طباعة المتصفح مباشرة.</p><div className="stack"><div className="report-action"><div><strong>التقرير المالي الشامل</strong><p className="tiny muted">النتيجة التشغيلية، النقدية والسلف القائمة.</p></div><Button type="button" variant="secondary" onClick={printFinancial}>طباعة</Button></div><div className="report-action"><div><strong>قائمة الدخل</strong><p className="tiny muted">تستبعد السلف حتى لا تتكرر تكلفة الموظف.</p></div><Button type="button" variant="secondary" onClick={printIncomeStatement}>طباعة</Button></div><div className="report-action"><div><strong>كشف التدفق النقدي</strong><p className="tiny muted">يشمل كل النقد الخارج بما فيه السلف.</p></div><Button type="button" variant="secondary" onClick={printCashFlow}>طباعة</Button></div><div className="report-action"><div><strong>مسير الرواتب الشهري</strong><p className="tiny muted">مسير {monthLabel(payrollPeriod)} فقط، دون تجميع سلف أو خصومات أو إضافات شهر آخر.</p></div><Button type="button" variant="secondary" onClick={printMonthlyPayroll}>طباعة</Button></div></div></Card><Card className="stack"><h2 className="h3">كيف تُقرأ الأرقام؟</h2><Notice tone="success">قائمة الدخل = الإيراد التشغيلي − تكلفة التشغيل. راتب الموظف يظهر بعد خصمه مرة واحدة، ولا تدخل السلفة فيه.</Notice><Notice tone="info">التدفق النقدي = ما دخل الخزينة − ما خرج منها. لذلك يظهر صرف السلفة هنا، لا ضمن التكلفة.</Notice><Notice tone="warn">قبل صرف راتب، راجع رصيد السلف القائم واختر المبلغ المخصوم بدقة في شاشة الصرف.</Notice></Card></div> : null}
+
+    <Modal open={!!ledgerEdit} title="تعديل قيد محاسبي" subtitle={ledgerEdit?.entry_type === 'salary' ? 'يمكن تعديل التاريخ والبيان؛ تعديل مبلغ صرف راتب يحتاج عكساً موثقاً لأن السلف والخصومات مرتبطة به.' : ledgerEdit?.entry_type === 'advance' ? 'لا يقبل النظام تخفيض السلفة عن الجزء الذي سُوّي فعلاً مع رواتب سابقة.' : 'عدّل بيانات القيد ثم احفظ التغيير.'} dirty={ledgerEditDirty} onClose={() => setLedgerEdit(null)} onSave={() => void saveLedgerEdit({ preventDefault: () => undefined } as React.FormEvent)} saveLabel={busy ? 'جارٍ الحفظ…' : 'حفظ التعديل'} footer={<Button disabled={busy} type="submit" form="ledger-edit-form">{busy ? 'جارٍ الحفظ…' : 'حفظ التعديل'}</Button>}>{ledgerEdit ? <form id="ledger-edit-form" className="stack" onSubmit={saveLedgerEdit}><div className="grid grid-2"><Input label="التاريخ" type="date" value={ledgerEdit.date} onChange={(event) => { setLedgerEdit({ ...ledgerEdit, date: event.target.value }); setLedgerEditDirty(true); }} /><Input label="المبلغ" type="number" min="0.01" step="0.01" disabled={ledgerEdit.amountLocked} value={ledgerEdit.amount} onChange={(event) => { setLedgerEdit({ ...ledgerEdit, amount: event.target.value }); setLedgerEditDirty(true); }} help={ledgerEdit.amountLocked ? 'مبلغ الراتب مرتبط بالسلف والخصومات المعالجة.' : undefined} />{ledgerEdit.entry_type === 'general' ? <Input label="التصنيف" value={ledgerEdit.category} onChange={(event) => { setLedgerEdit({ ...ledgerEdit, category: event.target.value }); setLedgerEditDirty(true); }} /> : <div className="input-wrap"><span className="label">نوع القيد</span><div className="notice">{LEDGER_ENTRY_LABEL[ledgerEdit.entry_type]}</div></div>}</div><Textarea label="البيان أو المرجع" value={ledgerEdit.description} onChange={(event) => { setLedgerEdit({ ...ledgerEdit, description: event.target.value }); setLedgerEditDirty(true); }} /><ErrorNotice error={error} /></form> : null}</Modal>
+
+    <Modal open={manualOpen} title={manualForm.kind === 'income' ? 'تسجيل إيراد يدوي' : 'تسجيل مصروف يدوي'} subtitle={manualForm.kind === 'income' ? 'لإيراد غير مرتبط بدفعة طالب.' : 'للمصروفات التشغيلية غير المرتبطة بالرواتب أو السلف.'} dirty={manualDirty} onClose={() => setManualOpen(false)} onSave={() => void saveManual({ preventDefault: () => undefined } as React.FormEvent)} saveLabel={busy ? 'جارٍ الحفظ…' : 'حفظ الحركة'} footer={<Button disabled={busy} type="submit" form="manual-ledger-form">{busy ? 'جارٍ الحفظ…' : 'حفظ الحركة'}</Button>}><form id="manual-ledger-form" className="stack" onSubmit={saveManual}><div className="grid grid-2"><Select label="التصنيف" value={manualForm.category} onChange={(event) => { setManualForm({ ...manualForm, category: event.target.value }); setManualDirty(true); }}>{(manualForm.kind === 'income' ? MANUAL_INCOME_CATEGORIES : MANUAL_EXPENSE_CATEGORIES).map((category) => <option key={category} value={category}>{category}</option>)}</Select><Input label="المبلغ" type="number" min="0.01" step="0.01" value={manualForm.amount} onChange={(event) => { setManualForm({ ...manualForm, amount: event.target.value }); setManualDirty(true); }} required /><Input label="التاريخ" type="date" value={manualForm.occurred_on} onChange={(event) => { setManualForm({ ...manualForm, occurred_on: event.target.value }); setManualDirty(true); }} /></div><Textarea label="وصف أو مرجع (اختياري)" value={manualForm.description} onChange={(event) => { setManualForm({ ...manualForm, description: event.target.value }); setManualDirty(true); }} /><Notice tone={manualForm.kind === 'income' ? 'warn' : 'info'}>{manualForm.kind === 'income' ? 'دفعات الطلاب لا تُدخل يدوياً: تظهر تلقائياً من شاشة المدفوعات.' : 'للرواتب والسلف استخدم تبويب «صرف الرواتب» أو «السلفيات» حتى تبقى التقارير صحيحة.'}</Notice><ErrorNotice error={error} /></form></Modal>
+
+    <Modal open={advanceOpen} title="صرف سلفة موظف" subtitle="السلفة نقد خرج ورصيد مستحق على الموظف، وليست مصروف تشغيل." dirty={advanceDirty} onClose={() => setAdvanceOpen(false)} onSave={() => void saveAdvance({ preventDefault: () => undefined } as React.FormEvent)} saveLabel={busy ? 'جارٍ الحفظ…' : 'صرف السلفة'} footer={<Button disabled={busy} type="submit" form="advance-form">{busy ? 'جارٍ الحفظ…' : 'صرف السلفة'}</Button>}><form id="advance-form" className="stack" onSubmit={saveAdvance}><div className="grid grid-2"><Select label="الموظف" value={advanceForm.employee_id} onChange={(event) => { setAdvanceForm({ ...advanceForm, employee_id: event.target.value }); setAdvanceDirty(true); }}><option value="">اختر الموظف</option>{staff.map((employee) => <option key={employee.id} value={employee.id}>{employee.full_name} — {roleLabel(employee.role)}</option>)}</Select><Input label="مبلغ السلفة" type="number" min="0.01" step="0.01" value={advanceForm.amount} onChange={(event) => { setAdvanceForm({ ...advanceForm, amount: event.target.value }); setAdvanceDirty(true); }} /><Input label="التاريخ" type="date" value={advanceForm.occurred_on} onChange={(event) => { setAdvanceForm({ ...advanceForm, occurred_on: event.target.value }); setAdvanceDirty(true); }} /></div><Textarea label="ملاحظة (اختيارية)" value={advanceForm.description} onChange={(event) => { setAdvanceForm({ ...advanceForm, description: event.target.value }); setAdvanceDirty(true); }} /><Notice tone="info">تظل السلفة رصيداً مستحقاً حتى تُسوّى. عند صرف راتب لاحق تعرض النافذة رصيدها المتبقي فقط، ويمكن خصم جزء منه مع حفظ شهر وتاريخ كل تسوية.</Notice><ErrorNotice error={error} /></form></Modal>
+
+    <Modal open={payrollOpen} title="صرف راتب موظف" subtitle="تعرض الذمم المتبقية فقط؛ راجعها وعدّل مبلغ التسوية أو العناصر المعتمدة قبل إصدار الصرف." dirty={payrollDirty} onClose={() => setPayrollOpen(false)} onSave={() => void savePayroll({ preventDefault: () => undefined } as React.FormEvent)} saveLabel={busy ? 'جارٍ الحفظ…' : 'اعتماد وصرف الراتب'} footer={<Button disabled={busy} type="submit" form="payroll-form">{busy ? 'جارٍ الحفظ…' : 'اعتماد وصرف الراتب'}</Button>}><form id="payroll-form" className="stack" onSubmit={savePayroll}>
+      <div className="grid grid-2"><Select label="الموظف" value={payrollForm.employee_id} onChange={(event) => { preparePayroll(event.target.value); setPayrollDirty(true); }}><option value="">اختر الموظف</option>{staff.map((employee) => <option key={employee.id} value={employee.id}>{employee.full_name} — {roleLabel(employee.role)}</option>)}</Select><Input label="الراتب الأساسي" type="number" min="0.01" step="0.01" value={payrollForm.base} onChange={(event) => { setPayrollForm({ ...payrollForm, base: event.target.value }); setPayrollDirty(true); }} required /><Input label="مكافأة (اختياري)" type="number" min="0" step="0.01" value={payrollForm.bonus} onChange={(event) => { setPayrollForm({ ...payrollForm, bonus: event.target.value }); setPayrollDirty(true); }} /><Input label="عمولة ضمن الراتب" type="number" min="0" step="0.01" value={payrollForm.commission} onChange={(event) => { setPayrollForm({ ...payrollForm, commission: event.target.value }); setPayrollDirty(true); }} /><Input label="السلف المعتمدة للخصم" type="number" min="0" max={selectedEmployeeAdvance} step="0.01" value={payrollForm.advance} onChange={(event) => { setPayrollForm({ ...payrollForm, advance: event.target.value }); setPayrollDirty(true); }} help={`الرصيد المتبقي المتاح: ${money(selectedEmployeeAdvance)}. يمكنك تسوية جزء منه في مسير هذا الشهر.`} /><Input label="الخصومات المعتمدة" type="number" min="0" max={selectedDeductionBalance} step="0.01" value={payrollForm.deduction} onChange={(event) => { setPayrollForm({ ...payrollForm, deduction: event.target.value }); setPayrollDirty(true); }} help={`رصيد العناصر المحددة: ${money(selectedDeductionBalance)}.`} /><Input label="تاريخ الصرف" type="date" min={payrollBounds.start} max={payrollBounds.end} value={payrollForm.occurred_on} onChange={(event) => { setPayrollForm({ ...payrollForm, occurred_on: event.target.value }); setPayrollDirty(true); }} help={`ضمن مسير ${monthLabel(payrollPeriod)} فقط.`} /></div>
+      <div className="grid grid-3"><div className="card compact soft"><span className="tiny muted">إجمالي الاستحقاق</span><strong>{money((Number(payrollForm.base) || 0) + (Number(payrollForm.bonus) || 0) + (Number(payrollForm.commission) || 0))}</strong></div><div className="card compact soft"><span className="tiny muted">الذمم المعتمدة</span><strong>{money((Number(payrollForm.advance) || 0) + (Number(payrollForm.deduction) || 0))}</strong></div><div className="card compact soft"><span className="tiny muted">صافي النقد المقترح</span><strong style={{ color: ((Number(payrollForm.base) || 0) + (Number(payrollForm.bonus) || 0) + (Number(payrollForm.commission) || 0) - (Number(payrollForm.advance) || 0) - (Number(payrollForm.deduction) || 0)) < 0 ? 'var(--danger)' : 'var(--success)' }}>{money((Number(payrollForm.base) || 0) + (Number(payrollForm.bonus) || 0) + (Number(payrollForm.commission) || 0) - (Number(payrollForm.advance) || 0) - (Number(payrollForm.deduction) || 0))}</strong></div></div>
+      {((Number(payrollForm.base) || 0) + (Number(payrollForm.bonus) || 0) + (Number(payrollForm.commission) || 0)) > 0 && ((Number(payrollForm.advance) || 0) + (Number(payrollForm.deduction) || 0)) > ((Number(payrollForm.base) || 0) + (Number(payrollForm.bonus) || 0) + (Number(payrollForm.commission) || 0)) ? <Notice tone="warn">إجمالي السلف والخصومات المعتمدة أكبر من الاستحقاق. خفّض مبلغاً منها قبل الاعتماد.</Notice> : null}
+      {payrollForm.employee_id ? <div className="stack"><div className="row-between"><div><strong>رصيد السلف المتبقي القابل للتسوية</strong><p className="tiny muted">تعرض القائمة الجزء غير المسدد فقط. يخصصه النظام للأقدم فالأحدث ويحفظ كل دفعة في مسير {monthLabel(payrollPeriod)}.</p></div><Badge tone={payrollAdvanceItems.length ? 'warn' : 'success'}>{payrollAdvanceItems.length ? `${payrollAdvanceItems.length} أرصدة متبقية` : 'لا توجد سلف معلقة'}</Badge></div>{payrollAdvanceItems.length ? <div className="stack">{payrollAdvanceItems.map((item) => <div key={item.id} className="card soft compact row-between"><span><strong>سلفة بتاريخ {formatDate(item.occurred_on)}</strong><br /><span className="tiny muted">رصيد مرحّل قابل للخصم من هذا الراتب</span></span><strong>{money(item.remaining)}</strong></div>)}</div> : <Notice tone="success">لا توجد أرصدة سلف غير مسددة لهذا الموظف.</Notice>}<div className="row-between"><div><strong>الخصومات المتبقية المقترحة</strong><p className="tiny muted">يمكنك إلغاء عنصر أو اعتماد جزء من إجمالي العناصر المحددة؛ لا تظهر الخصومات المسددة.</p></div><Badge tone={payrollDeductionItems.length ? 'warn' : 'default'}>{payrollDeductionItems.length ? `${payrollDeductionItems.length} عناصر` : 'لا توجد خصومات'}</Badge></div>{payrollDeductionItems.length ? <div className="stack">{payrollDeductionItems.map((item) => { const remaining = valueOf(item.amount) - valueOf(item.applied_amount); const checked = payrollForm.deductionIds.includes(item.id); return <label key={item.id} className="card soft compact row-between" style={{ cursor: 'pointer' }}><span className="row"><input type="checkbox" checked={checked} onChange={(event) => choosePayrollDeductions(event.target.checked ? [...payrollForm.deductionIds, item.id] : payrollForm.deductionIds.filter((id) => id !== item.id))} /><span><strong>{item.reason}</strong><br /><span className="tiny muted">رصيد متبقٍ من {formatDate(item.occurred_on)}{item.notes ? ` — ${item.notes}` : ''}</span></span></span><strong>{money(remaining)}</strong></label>; })}</div> : <Notice tone="success">لا توجد خصومات مفتوحة لهذا الموظف. أضفها من تبويب «الخصومات» عند الحاجة.</Notice>}</div> : null}
+      <Textarea label="بيان الصرف (اختياري)" value={payrollForm.description} onChange={(event) => { setPayrollForm({ ...payrollForm, description: event.target.value }); setPayrollDirty(true); }} /><Notice tone="success">صافي النقد المدفوع = الأساسي + المكافأة + العمولة − السلف المعتمدة − الخصومات المعتمدة. السلفة لا تخصم من تكلفة التشغيل، بينما الخصم يخفض الاستحقاق فقط.</Notice><ErrorNotice error={error} /></form></Modal>
+
+    <Modal open={deductionOpen} title={deductionEditId ? 'تعديل خصم على موظف' : 'تسجيل خصم على موظف'} subtitle="الخصم يظل معلقاً في حساب الموظف، ويظهر تلقائياً عند صرف راتبه؛ لا ينشئ مصروفاً أو حركة نقدية." dirty={deductionDirty} onClose={() => { setDeductionOpen(false); setDeductionEditId(null); }} onSave={() => void saveDeduction({ preventDefault: () => undefined } as React.FormEvent)} saveLabel={busy ? 'جارٍ الحفظ…' : deductionEditId ? 'حفظ التعديل' : 'تسجيل الخصم'} footer={<Button disabled={busy} type="submit" form="deduction-form">{busy ? 'جارٍ الحفظ…' : deductionEditId ? 'حفظ التعديل' : 'تسجيل الخصم'}</Button>}><form id="deduction-form" className="stack" onSubmit={saveDeduction}><div className="grid grid-2"><Select label="الموظف" value={deductionForm.employee_id} onChange={(event) => { setDeductionForm({ ...deductionForm, employee_id: event.target.value }); setDeductionDirty(true); }}><option value="">اختر الموظف</option>{staff.map((employee) => <option key={employee.id} value={employee.id}>{employee.full_name} — {roleLabel(employee.role)}</option>)}</Select><Input label="مبلغ الخصم" type="number" min="0.01" step="0.01" value={deductionForm.amount} onChange={(event) => { setDeductionForm({ ...deductionForm, amount: event.target.value }); setDeductionDirty(true); }} required /><Input label="سبب الخصم" value={deductionForm.reason} onChange={(event) => { setDeductionForm({ ...deductionForm, reason: event.target.value }); setDeductionDirty(true); }} required /><Input label="تاريخ تسجيل الخصم" type="date" value={deductionForm.occurred_on} onChange={(event) => { setDeductionForm({ ...deductionForm, occurred_on: event.target.value }); setDeductionDirty(true); }} /></div><Textarea label="تفاصيل أو مرجع (اختياري)" value={deductionForm.notes} onChange={(event) => { setDeductionForm({ ...deductionForm, notes: event.target.value }); setDeductionDirty(true); }} /><Notice tone="info">عند فتح «صرف راتب» لهذا الموظف، سيظهر هذا الخصم ضمن العناصر المقترحة ويمكن اعتماد كامل المبلغ أو جزء منه.</Notice><ErrorNotice error={error} /></form></Modal>
+
+    <Modal open={commissionPayOpen} title="صرف عمولة مستقلة" subtitle="إذا لم تُضم العمولة إلى تسوية الراتب." dirty={commissionPayDirty} onClose={() => setCommissionPayOpen(false)} onSave={() => void saveCommissionPayment({ preventDefault: () => undefined } as React.FormEvent)} saveLabel={busy ? 'جارٍ الحفظ…' : 'صرف العمولة'} footer={<Button disabled={busy} type="submit" form="commission-payment-form">{busy ? 'جارٍ الحفظ…' : 'صرف العمولة'}</Button>}><form id="commission-payment-form" className="stack" onSubmit={saveCommissionPayment}><div className="grid grid-2"><Select label="الموظف" value={commissionPay.employee_id} onChange={(event) => { setCommissionPay({ ...commissionPay, employee_id: event.target.value }); setCommissionPayDirty(true); }}><option value="">اختر الموظف</option>{staff.map((employee) => <option key={employee.id} value={employee.id}>{employee.full_name}</option>)}</Select><Input label="المبلغ" type="number" min="0.01" step="0.01" value={commissionPay.amount} onChange={(event) => { setCommissionPay({ ...commissionPay, amount: event.target.value }); setCommissionPayDirty(true); }} /><Input label="التاريخ" type="date" value={commissionPay.occurred_on} onChange={(event) => { setCommissionPay({ ...commissionPay, occurred_on: event.target.value }); setCommissionPayDirty(true); }} /></div><Textarea label="بيان الصرف (اختياري)" value={commissionPay.description} onChange={(event) => { setCommissionPay({ ...commissionPay, description: event.target.value }); setCommissionPayDirty(true); }} /><ErrorNotice error={error} /></form></Modal>
+
+    <Modal open={ruleOpen} title="قاعدة عمولة تحصيل" subtitle="النسبة التي يستحقها الموظف من تحصيله ضمن فترة القاعدة." dirty={ruleDirty} onClose={() => setRuleOpen(false)} onSave={() => void saveRule({ preventDefault: () => undefined } as React.FormEvent)} saveLabel={busy ? 'جارٍ الحفظ…' : 'حفظ القاعدة'} footer={<Button disabled={busy} type="submit" form="commission-rule-form">{busy ? 'جارٍ الحفظ…' : 'حفظ القاعدة'}</Button>}><form id="commission-rule-form" className="stack" onSubmit={saveRule}><div className="grid grid-2"><Select label="الموظف" value={ruleForm.staff_id} onChange={(event) => { setRuleForm({ ...ruleForm, staff_id: event.target.value }); setRuleDirty(true); }}><option value="">اختر الموظف</option>{staff.map((employee) => <option key={employee.id} value={employee.id}>{employee.full_name}</option>)}</Select><Input label="نسبة العمولة %" type="number" min="0" max="100" step="0.01" value={ruleForm.rate} onChange={(event) => { setRuleForm({ ...ruleForm, rate: event.target.value }); setRuleDirty(true); }} /><Input label="تبدأ من" type="date" value={ruleForm.starts_on} onChange={(event) => { setRuleForm({ ...ruleForm, starts_on: event.target.value }); setRuleDirty(true); }} /><Input label="تنتهي في (اختياري)" type="date" value={ruleForm.ends_on} onChange={(event) => { setRuleForm({ ...ruleForm, ends_on: event.target.value }); setRuleDirty(true); }} /></div><label className="row small"><input type="checkbox" checked={ruleForm.is_active} onChange={(event) => { setRuleForm({ ...ruleForm, is_active: event.target.checked }); setRuleDirty(true); }} /> القاعدة فعّالة</label><ErrorNotice error={error} /></form></Modal>
   </>;
 }

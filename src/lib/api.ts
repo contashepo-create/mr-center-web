@@ -6,12 +6,14 @@
 import { getSupabase } from './supabase';
 import { getDeviceId } from './visitors';
 import { normalizeAnswerText, nowIso, todayIso, uuid } from './utils';
+import { brandForCenter, normalizeCenterPrintSettings, type CenterPrintBranding } from './printing';
 import type {
   Announcement, AppExam, AppInquiry, AppNotification, AppSurvey, AppSurveyResponse, Attendance, AttendanceStatus,
   Center, CenterLookup, CenterSettings, Due, ExamAttempt, Grade,
   ExamAnswer, ExamQuestion, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
   PublishedExam, SessionRecord, Student, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
-  SurveyAnswer, SurveyQuestion,
+  SurveyAnswer, SurveyQuestion, StudentAccount, DeveloperBroadcastChannel, CenterBroadcastDelivery, DeveloperBroadcastPresentation, DeveloperBroadcastResult,
+  CommunicationSummary,
 } from './types';
 
 // ------------------------------------------------------------
@@ -548,6 +550,8 @@ export async function upsertGroup(centerId: string, group: Partial<Group> & { na
     billing_type: group.billing_type ?? 'monthly',
     weekly_price: group.weekly_price ?? 0,
     session_price: group.session_price ?? 0,
+    due_mode: group.due_mode ?? 'manual',
+    attendance_due_amount: group.attendance_due_amount ?? 0,
   };
   if (group.id) {
     const { error } = await getSupabase().from('groups').update(payload).eq('id', group.id);
@@ -591,7 +595,8 @@ export async function fetchStudentById(id: string): Promise<Student | null> {
   return (data as Student) ?? null;
 }
 
-export async function upsertStudent(centerId: string, s: Partial<Student> & { name: string }): Promise<void> {
+export async function upsertStudent(centerId: string, s: Partial<Student> & { name: string }): Promise<string> {
+  const studentId = s.id ?? uuid();
   const payload = {
     center_id: centerId,
     name: s.name.trim(),
@@ -608,9 +613,10 @@ export async function upsertStudent(centerId: string, s: Partial<Student> & { na
     if (error) throw error;
   } else {
     const { error } = await getSupabase().from('students')
-      .insert({ id: uuid(), created_at: nowIso(), ...payload });
+      .insert({ id: studentId, created_at: nowIso(), ...payload });
     if (error) throw error;
   }
+  return studentId;
 }
 
 export async function deleteStudent(id: string): Promise<void> {
@@ -665,11 +671,15 @@ export async function saveAttendance(
     created_at: byStudent.get(r.student_id)?.created_at ?? nowIso(),
   }));
   if (upserts.length === 0) return;
-  const { error } = await getSupabase().from('attendance').upsert(upserts);
+  const sb = getSupabase();
+  const { error } = await sb.from('attendance').upsert(upserts);
   if (error) throw error;
+  // الدالة خادمية وidempotent: لا تنشئ مستحقين للحصة نفسها، وتطبق الرصيد المقدم تلقائياً.
+  const { error: duesError } = await sb.rpc('sync_attendance_dues_for_session', { p_center: centerId, p_session: sessionId });
+  if (duesError) throw duesError;
 }
 
-// ---------- المدفوعات والمستحقات ----------
+// ---------- التحصيل والمستحقات ----------
 
 export async function fetchDues(centerId: string, month: number, year: number): Promise<Due[]> {
   const { data, error } = await getSupabase().from('dues').select('*')
@@ -682,24 +692,16 @@ export async function fetchDues(centerId: string, month: number, year: number): 
 export async function generateDuesForGroup(
   centerId: string, group: Group, month: number, year: number,
 ): Promise<{ created: number; amount: number; skippedNoSessions: boolean }> {
-  const inGroup = await fetchGroupMembers(centerId, group.id);
-  if (inGroup.length === 0) return { created: 0, amount: 0, skippedNoSessions: false };
-  const amount = await dueAmountForGroup(centerId, group, month, year);
-  if (amount === null) return { created: 0, amount: 0, skippedNoSessions: true };
-  const existing = await fetchDues(centerId, month, year);
-  // طالب المجموعتين يستحق عن كل مجموعة على حدة (المفتاح طالب+مجموعة)
-  const existingKeys = new Set(existing.filter((d) => d.group_id === group.id).map((d) => d.student_id));
-  const rows = inGroup
-    .filter((s) => !existingKeys.has(s.id))
-    .map((s) => ({
-      id: uuid(), center_id: centerId, student_id: s.id, group_id: group.id,
-      month, due_year: year, amount, status: 'pending', created_at: nowIso(),
-    }));
-  if (rows.length > 0) {
-    const { error } = await getSupabase().from('dues').insert(rows);
-    if (error) throw error;
-  }
-  return { created: rows.length, amount, skippedNoSessions: false };
+  const { data, error } = await getSupabase().rpc('generate_manual_dues_for_group', {
+    p_center: centerId, p_group: group.id, p_month: month, p_year: year,
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as { created?: number; amount?: number; skipped_no_sessions?: boolean };
+  return {
+    created: Number(result.created ?? 0),
+    amount: Number(result.amount ?? 0),
+    skippedNoSessions: Boolean(result.skipped_no_sessions),
+  };
 }
 
 /** مبلغ الاستحقاق حسب نظام التسعير — null إن كان بالحصة ولا حصص مسجلة بعد */
@@ -812,6 +814,47 @@ export async function recordPayment(input: {
   if (error) throw error;
 }
 
+/** تحصيل مقدم للطالب: يظهر رصيداً دائنًا ويُطبّق تلقائياً على مستحق قائم إن وجد. */
+export async function recordStudentCredit(input: {
+  centerId: string; studentId: string; amount: number; month: number; year: number; notes?: string;
+}): Promise<void> {
+  await recordPayment({ ...input, dueId: null });
+}
+
+/** تحصيل المستحقات المختارة من مجموعة في معاملة واحدة؛ الاختيار نفسه لا يحفظ شيئاً. */
+export async function recordBulkDuePayments(input: {
+  centerId: string; month: number; year: number; items: { dueId: string; amount: number }[]; notes?: string;
+}): Promise<{ count: number; total: number }> {
+  if (input.items.length === 0) throw new Error('اختر طالباً واحداً على الأقل.');
+  const { data, error } = await getSupabase().rpc('record_bulk_due_payments', {
+    p_center: input.centerId,
+    p_month: input.month,
+    p_year: input.year,
+    p_items: input.items.map((item) => ({ due_id: item.dueId, amount: Number(item.amount) })),
+    p_notes: input.notes?.trim() || null,
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as { count?: number; total?: number };
+  return { count: Number(result.count ?? 0), total: Number(result.total ?? 0) };
+}
+
+/** كشف موحد للمستحقات والرصيد المقدم والتسويات؛ مصدره RPC محمي. */
+export async function fetchStudentAccount(centerId: string, studentId: string): Promise<StudentAccount> {
+  const { data, error } = await getSupabase().rpc('get_student_account', { p_center: centerId, p_student: studentId });
+  if (error) throw error;
+  return (data ?? {}) as StudentAccount;
+}
+
+/** تصفير الرصيد أو المديونية دون إدراج دفعة جديدة أو خلق إيراد ثانٍ. */
+export async function settleStudentAccount(centerId: string, studentId: string, notes?: string): Promise<{ creditSettled: number; debtSettled: number }> {
+  const { data, error } = await getSupabase().rpc('settle_student_account', {
+    p_center: centerId, p_student: studentId, p_notes: notes?.trim() || null,
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as { credit_settled?: number; debt_settled?: number };
+  return { creditSettled: Number(result.credit_settled ?? 0), debtSettled: Number(result.debt_settled ?? 0) };
+}
+
 export async function updateStudentGroup(studentId: string, groupId: string | null, gradeId: string | null): Promise<void> {
   const { error } = await getSupabase().from('students')
     .update({ group_id: groupId, grade_id: gradeId, updated_at: nowIso() }).eq('id', studentId);
@@ -901,7 +944,7 @@ export async function fetchAdminStats(centerId: string): Promise<AdminStats> {
     sb.from('dues').select('id', { count: 'exact', head: true })
       .eq('center_id', centerId).eq('status', 'pending'),
     sb.from('payments').select('amount')
-      .eq('center_id', centerId).eq('month', now.getMonth() + 1).eq('year', now.getFullYear()),
+      .eq('center_id', centerId).eq('month', now.getMonth() + 1).eq('payment_year', now.getFullYear()),
   ]);
   const { data: todaySessions } = await sb.from('sessions').select('id')
     .eq('center_id', centerId).eq('session_date', today);
@@ -1024,7 +1067,8 @@ export async function fetchExams(centerId: string): Promise<AppExam[]> {
 
 export async function upsertExam(centerId: string, exam: Partial<AppExam> & {
   title: string; questions: ExamQuestion[]; answers: ExamAnswer[];
-}): Promise<void> {
+}): Promise<string> {
+  const examId = exam.id || uuid();
   const marksSum = exam.questions.reduce((s, q) => s + (Number(q.marks) || 1), 0);
   const total = exam.questions.length > 0
     ? Number(exam.total_score || 0) || marksSum
@@ -1057,15 +1101,24 @@ export async function upsertExam(centerId: string, exam: Partial<AppExam> & {
     is_published: exam.is_published ?? false,
     attempts_allowed: exam.attempts_allowed ?? 1,
     show_result: exam.show_result ?? 'end',
+    delivery_mode: exam.delivery_mode ?? 'online',
+    online_mode: exam.online_mode ?? 'mixed',
+    target_group_ids: exam.target_group_ids ?? [],
+    availability_mode: exam.availability_mode ?? 'always',
+    available_from: exam.availability_mode === 'scheduled' ? exam.available_from ?? null : null,
+    available_until: exam.availability_mode === 'scheduled' ? exam.available_until ?? null : null,
+    paper_template: exam.paper_template ?? 'classic',
+    paper_footer: exam.paper_footer?.trim().slice(0, 350) ?? '',
     ornaments: exam.ornaments ?? null,
   };
   if (exam.id) {
-    const { error } = await getSupabase().from('app_exams').update(payload).eq('id', exam.id);
+    const { error } = await getSupabase().from('app_exams').update(payload).eq('id', examId);
     if (error) throw error;
   } else {
-    const { error } = await getSupabase().from('app_exams').insert({ id: uuid(), ...payload });
+    const { error } = await getSupabase().from('app_exams').insert({ id: examId, ...payload });
     if (error) throw error;
   }
+  return examId;
 }
 
 export async function deleteExam(id: string): Promise<void> {
@@ -1150,10 +1203,13 @@ export async function fetchMyInquiries(studentId: string): Promise<AppInquiry[]>
 
 export async function addInquiry(input: {
   centerId: string; studentId: string; kind: InquiryKind; subject: string; body: string;
+  fromGroupId?: string | null; toGroupId?: string | null;
 }): Promise<void> {
   const { error } = await getSupabase().from('app_inquiries').insert({
     id: uuid(), center_id: input.centerId, student_id: input.studentId,
     kind: input.kind, subject: input.subject.trim(), body: input.body.trim(),
+    from_group_id: input.kind === 'transfer' ? input.fromGroupId ?? null : null,
+    to_group_id: input.kind === 'transfer' ? input.toGroupId ?? null : null,
     status: 'pending', created_at: nowIso(), updated_at: nowIso(),
   });
   if (error) throw error;
@@ -1162,6 +1218,14 @@ export async function addInquiry(input: {
 export async function replyInquiry(id: string, reply: string, status: InquiryStatus): Promise<void> {
   const { error } = await getSupabase().from('app_inquiries')
     .update({ reply: reply.trim(), status, updated_at: nowIso() }).eq('id', id);
+  if (error) throw error;
+}
+
+/** قبول/رفض طلب نقل موثق؛ القبول يغيّر المجموعة الأساسية داخل RPC ذرية. */
+export async function resolveStudentTransfer(id: string, status: 'approved' | 'rejected', reply = ''): Promise<void> {
+  const { error } = await getSupabase().rpc('resolve_student_transfer', {
+    p_inquiry_id: id, p_status: status, p_reply: reply.trim() || null,
+  });
   if (error) throw error;
 }
 
@@ -1247,6 +1311,18 @@ export async function fetchSurveyResponses(surveyId: string): Promise<AppSurveyR
   return (data ?? []) as AppSurveyResponse[];
 }
 
+/** أعداد الردود لكل استبيان، لتظهر حالة المشاركة في القائمة دون فتح كل استبيان. */
+export async function fetchSurveyResponseCounts(centerId: string): Promise<Record<string, number>> {
+  const { data, error } = await getSupabase().from('app_survey_responses').select('survey_id')
+    .eq('center_id', centerId).limit(5000);
+  if (error) throw error;
+  return (data ?? []).reduce<Record<string, number>>((counts, row) => {
+    const id = String((row as { survey_id?: string }).survey_id ?? '');
+    if (id) counts[id] = (counts[id] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
 export async function fetchMySurveyResponses(studentId: string): Promise<AppSurveyResponse[]> {
   const { data, error } = await getSupabase().from('app_survey_responses').select('*')
     .eq('student_id', studentId).limit(200);
@@ -1257,6 +1333,69 @@ export async function fetchMySurveyResponses(studentId: string): Promise<AppSurv
 // ------------------------------------------------------------
 // الإشعارات الداخلية (بث جماعي بضغطة: صف واحد لكل رسالة)
 // ------------------------------------------------------------
+
+/** بث المطور عبر القنوات الخمس فقط؛ اختيار المستلمين والتحقق يتمان خادمياً. */
+export async function developerBroadcastNotification(input: {
+  channel: DeveloperBroadcastChannel;
+  title: string;
+  body: string;
+  centerId?: string | null;
+  centerDelivery?: CenterBroadcastDelivery | null;
+  presentation?: DeveloperBroadcastPresentation;
+}): Promise<DeveloperBroadcastResult> {
+  const { data, error } = await getSupabase().rpc('developer_broadcast_notification', {
+    p_channel: input.channel,
+    p_title: input.title.trim(),
+    p_body: input.body.trim(),
+    p_center: input.centerId || null,
+    p_center_delivery: input.centerDelivery || null,
+    p_presentation: input.presentation ?? 'notification',
+  });
+  if (error) throw error;
+  return data as DeveloperBroadcastResult;
+}
+
+/** يحدث عدادات الشريط العلوي فور القراءة/الرد، من دون انتظار إعادة تحميل الصفحة. */
+export function notifyCommunicationChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('mrcenter:communication-changed'));
+}
+
+/** رسائل المطور الخاصة بصاحب السنتر أو موظفه، مفلترة حسب الحساب خادمياً. */
+export async function fetchMyDeveloperNotifications(): Promise<MyNotification[]> {
+  const { data, error } = await getSupabase().rpc('get_my_developer_notifications');
+  if (error) throw error;
+  return (data ?? []) as MyNotification[];
+}
+
+/** ملخص عدادات ورسائل الشريط العلوي. لا يعيد إلا عناصر الحساب الحالي ومساراتها المناسبة. */
+export async function fetchMyCommunicationSummary(): Promise<CommunicationSummary> {
+  const { data, error } = await getSupabase().rpc('get_my_communication_summary');
+  if (error) throw error;
+  const raw = (data ?? {}) as Partial<CommunicationSummary>;
+  return {
+    notifications: { unread: Number(raw.notifications?.unread ?? 0), items: Array.isArray(raw.notifications?.items) ? raw.notifications.items : [] },
+    messages: { unread: Number(raw.messages?.unread ?? 0), items: Array.isArray(raw.messages?.items) ? raw.messages.items : [] },
+  };
+}
+
+/** تعليم أي إشعار ظاهر للحساب الحالي؛ يتحقق RPC من الدور والسنتر والجمهور. */
+export async function markMyCommunicationNotificationRead(notificationId: string): Promise<void> {
+  const { error } = await getSupabase().rpc('mark_my_communication_notification_read', { p_notification: notificationId });
+  if (error) throw error;
+  notifyCommunicationChanged();
+}
+
+/** تعليم رسالة المطور المتاحة لهذا الحساب فقط كمقروءة. */
+export async function markDeveloperNotificationRead(notificationId: string): Promise<void> {
+  await markMyCommunicationNotificationRead(notificationId);
+}
+
+/** تعليم رسائل الدعم الواردة للحساب الحالي كمقروءة عند فتح المحادثة. */
+export async function markMySupportMessagesRead(centerId?: string | null): Promise<void> {
+  const { error } = await getSupabase().rpc('mark_my_support_messages_read', { p_center: centerId ?? null });
+  if (error) throw error;
+  notifyCommunicationChanged();
+}
 
 export async function fetchNotifications(centerId: string): Promise<AppNotification[]> {
   const { data, error } = await getSupabase().from('app_notifications').select('*')
@@ -1307,29 +1446,6 @@ export async function fetchMyNotifications(): Promise<MyNotification[]> {
   const { data, error } = await getSupabase().rpc('get_my_notifications');
   if (error) throw error;
   return (data ?? []) as MyNotification[];
-}
-
-/** إشعارات المطور الخاصة بأصحاب السنتر (قناة owners) */
-export async function fetchOwnerNotices(centerId: string): Promise<AppNotification[]> {
-  const { data, error } = await getSupabase().from('app_notifications').select('*')
-    .eq('center_id', centerId).eq('audience', 'owners')
-    .order('created_at', { ascending: false }).limit(100);
-  if (error) throw error;
-  return (data ?? []) as AppNotification[];
-}
-
-/** تعليم إشعار مطور كمقروء (يُخزن بمعرف حساب المسئول) */
-export async function markOwnerNoticeRead(centerId: string, notificationId: string): Promise<void> {
-  const { data: sess } = await getSupabase().auth.getSession();
-  const uid = sess.session?.user.id;
-  if (!uid) throw new Error('not_authenticated');
-  const { data: mine } = await getSupabase().from('app_notification_reads').select('id')
-    .eq('notification_id', notificationId).eq('student_id', uid).maybeSingle();
-  if (mine) return;
-  const { error } = await getSupabase().from('app_notification_reads').insert({
-    id: uuid(), center_id: centerId, notification_id: notificationId, student_id: uid,
-  });
-  if (error) throw error;
 }
 
 // ------------------------------------------------------------
@@ -1390,6 +1506,7 @@ export async function markNotificationRead(centerId: string, notificationId: str
     id: uuid(), center_id: centerId, notification_id: notificationId, student_id: studentId,
   });
   if (error && !String((error as { message?: string }).message ?? '').includes('duplicate key')) throw error;
+  notifyCommunicationChanged();
 }
 
 // ------------------------------------------------------------
@@ -1406,7 +1523,14 @@ export async function fetchCenterSettings(centerId: string): Promise<CenterSetti
     contact_email: s.contact_email ?? '',
     registration_open: s.registration_open ?? true,
     archive_year: s.archive_year ?? '',
+    print: normalizeCenterPrintSettings(s.print),
   };
+}
+
+/** هوية الوثائق في كل شاشة طباعة؛ تُقرأ وقت الطباعة حتى يطبق آخر تعديل فوراً. */
+export async function fetchCenterPrintBranding(centerId: string): Promise<CenterPrintBranding> {
+  const [settings, center] = await Promise.all([fetchCenterSettings(centerId), fetchMyCenter(centerId)]);
+  return brandForCenter(center?.name, settings.print);
 }
 
 export async function saveCenterSettings(centerId: string, s: CenterSettings): Promise<void> {
@@ -1417,6 +1541,7 @@ export async function saveCenterSettings(centerId: string, s: CenterSettings): P
       contact_email: s.contact_email.trim(),
       registration_open: !!s.registration_open,
       archive_year: s.archive_year.trim(),
+      print: normalizeCenterPrintSettings(s.print),
     },
     updated_at: nowIso(),
   });

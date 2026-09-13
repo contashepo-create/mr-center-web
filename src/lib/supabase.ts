@@ -2,6 +2,7 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import type { PublicConfig } from './types';
 import { dbConfigFromRemote, isValidSupabaseUrl } from './utils';
 import { AUTH_API, AUTH_STORAGE_KEY, DEFAULT_CONFIG_URL } from './auth/constants';
+import { shouldExposeStoredSession } from './auth/clientSession';
 
 export interface SupabaseConfig {
   url: string;
@@ -88,7 +89,13 @@ function hybridAuthStorage(): import('@supabase/supabase-js').SupportedStorage {
   return {
     getItem: (key: string) => {
       if (typeof window === 'undefined') return null;
-      return window.localStorage.getItem(key);
+      const stored = window.localStorage.getItem(key);
+      if (key === AUTH_STORAGE_KEY && !shouldExposeStoredSession(stored)) {
+        // لا نسمح للـ SDK بتجديد access token برمز تجديد فارغ؛
+        // SessionProvider يجدده أولاً من كوكيز HttpOnly.
+        return null;
+      }
+      return stored;
     },
     setItem: async (key: string, value: string) => {
       if (typeof window === 'undefined') return;
@@ -101,12 +108,16 @@ function hybridAuthStorage(): import('@supabase/supabase-js').SupportedStorage {
       try {
         const session = JSON.parse(value) as { refresh_token?: string };
         if (session && typeof session.refresh_token === 'string' && session.refresh_token) {
-          // إرسال رمز التجديد للخادم (كوكيز HttpOnly) دون انتظار حتى لا يبطئ الدخول
-          fetch(AUTH_API.storeRefresh, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refresh_token: session.refresh_token }),
-          }).catch(() => { /* تجاهل فشل الشبكة المؤقت */ });
+          // انتظر اكتمال الطلب كي لا تغادر الصفحة قبل حفظ الكوكيز؛
+          // لا نعرقل تسجيل الدخول إذا تعطلت الشبكة، فالجلسة الحالية ما زالت صالحة.
+          try {
+            await fetch(AUTH_API.storeRefresh, {
+              method: 'POST',
+              credentials: 'same-origin',
+              headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+              body: JSON.stringify({ refresh_token: session.refresh_token }),
+            });
+          } catch { /* ستنتهي الجلسة بأمان ويطلب الموقع الدخول مجدداً */ }
         }
         // خزّن الجلسة بدون رمز التجديد (يبقى حصرياً في الكوكيز الخادمي)
         stripped = JSON.stringify({ ...session, refresh_token: '' });

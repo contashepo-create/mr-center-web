@@ -8,7 +8,7 @@ import { can } from '@/lib/rbac';
 import { useTeacherGroupIds } from '@/lib/staff';
 import type { Attendance, Due, Group, ManualGrade, Payment, SessionRecord, Student } from '@/lib/types';
 import { arabicMonth, formatMoney } from '@/lib/utils';
-import { buildReportHtml, printReport } from '@/lib/report';
+import { buildReportHtml, printCenterReport } from '@/lib/report';
 
 export default function ReportsPage() {
   const { profile } = useSession();
@@ -55,12 +55,12 @@ export default function ReportsPage() {
   const print = () => {
     const studentNames = new Map(visibleStudents.map((s) => [s.id, s.name]));
     const groupNames = new Map(visibleGroups.map((g) => [g.id, g.name]));
-    printReport(buildReportHtml(`تقرير ${arabicMonth(Number(month))} ${year}`, 'ملخص إداري ومالي وأكاديمي', [
+    void printCenterReport(profile?.center_id, (branding) => buildReportHtml(`تقرير ${arabicMonth(Number(month))} ${year}`, 'ملخص إداري ومالي وأكاديمي', [
       { title: 'ملخص عام', headers: ['البند', 'القيمة'], rows: [['عدد الطلاب', String(visibleStudents.length)], ['عدد المجموعات', String(visibleGroups.length)], ['عدد الحصص', String(visibleSessions.length)], ['حضور/غياب', `${stats.present} / ${stats.absent}`], ['إجمالي المستحقات', formatMoney(stats.due)], ['إجمالي التحصيل', formatMoney(stats.paid)], ['متوسط الدرجات', stats.avg === null ? '—' : `${stats.avg}%`]] },
       { title: 'المستحقات', headers: ['الطالب', 'المجموعة', 'المبلغ', 'الحالة'], rows: visibleDues.map((d) => [studentNames.get(d.student_id) ?? d.student_id, d.group_id ? groupNames.get(d.group_id) ?? '—' : '—', formatMoney(d.amount), d.status]) },
       { title: 'الدفعات', headers: ['الطالب', 'المبلغ', 'التاريخ', 'ملاحظات'], rows: visiblePayments.map((p) => [studentNames.get(p.student_id) ?? p.student_id, formatMoney(p.amount), p.payment_date, p.notes ?? '—']) },
       { title: 'الدرجات', headers: ['الطالب', 'التقييم', 'الدرجة'], rows: visibleGrades.map((g) => [studentNames.get(g.student_id) ?? g.student_id, g.title, `${g.score}/${g.max_score}`]) },
-    ], { name: profile?.full_name }));
+    ], { name: profile?.full_name, branding }));
   };
   return <><PageHeader title="التقارير" subtitle="تقارير شهرية قابلة للطباعة أو الحفظ PDF من المتصفح." actions={<Button type="button" onClick={print}>طباعة / PDF</Button>} /><ErrorNotice error={error} /><Card className="stack" style={{ marginBottom: 18 }}><div className="grid grid-3"><Select label="الشهر" value={month} onChange={(e) => setMonth(e.target.value)}>{Array.from({ length: 12 }, (_, i) => <option key={i + 1} value={i + 1}>{arabicMonth(i + 1)}</option>)}</Select><Input label="السنة" type="number" value={year} onChange={(e) => setYear(e.target.value)} /><div className="input-wrap"><span className="label">الفترة</span><div className="notice">{arabicMonth(Number(month))} {year}</div></div></div></Card><div className="grid grid-4" style={{ marginBottom: 18 }}><Card className="compact kpi"><span className="muted">الطلاب</span><div className="kpi-value">{visibleStudents.length}</div></Card><Card className="compact kpi"><span className="muted">الحصص</span><div className="kpi-value">{visibleSessions.length}</div></Card><Card className="compact kpi"><span className="muted">التحصيل</span><div className="kpi-value">{formatMoney(stats.paid)}</div></Card><Card className="compact kpi"><span className="muted">متوسط الدرجات</span><div className="kpi-value">{stats.avg === null ? '—' : `${stats.avg}%`}</div></Card></div><div className="grid grid-2"><Card className="stack"><div className="row-between"><h2 className="h3">حضور الشهر</h2><Badge tone="success">{stats.present} حاضر</Badge><Badge tone="danger">{stats.absent} غائب</Badge></div>{visibleAttendance.length === 0 ? <EmptyState title="لا يوجد حضور" /> : null}</Card><Card className="stack"><h2 className="h3">مالي</h2><div className="notice">المستحقات: {formatMoney(stats.due)} · المحصل: {formatMoney(stats.paid)} · المتبقي التقريبي: {formatMoney(Math.max(0, stats.due - stats.paid))}</div></Card></div></>;
 }

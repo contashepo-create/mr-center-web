@@ -71,9 +71,9 @@ try {
     await assertOk(await o.auth.signInWithPassword({ email: ownerEmail, password: loginCredential }));
     await assertOk(await o.from('sessions').insert({ id: sessionId, center_id: centerId, group_id: groupId, session_date: new Date().toISOString().slice(0, 10), start_time: '09:00', end_time: '10:00' }));
     await assertOk(await o.from('attendance').insert({ id: `web-att-${ts}`, center_id: centerId, session_id: sessionId, student_id: studentId, status: 'present' }));
-    await assertOk(await o.from('dues').insert({ id: `web-due-${ts}`, center_id: centerId, student_id: studentId, group_id: groupId, month: 9, year: 2026, amount: 100, status: 'pending' }));
-    await assertOk(await o.from('payments').insert({ id: `web-pay-${ts}`, center_id: centerId, student_id: studentId, due_id: `web-due-${ts}`, amount: 100, payment_date: new Date().toISOString().slice(0, 10), month: 9, year: 2026 }));
-    await assertOk(await o.from('manual_grades').insert({ id: `web-grade-row-${ts}`, center_id: centerId, student_id: studentId, title: 'تقييم ويب', score: 9, max_score: 10, month: 9, year: 2026 }));
+    await assertOk(await o.from('dues').insert({ id: `web-due-${ts}`, center_id: centerId, student_id: studentId, group_id: groupId, month: 9, due_year: 2026, amount: 100, status: 'pending' }));
+    await assertOk(await o.from('payments').insert({ id: `web-pay-${ts}`, center_id: centerId, student_id: studentId, due_id: `web-due-${ts}`, amount: 100, payment_date: new Date().toISOString().slice(0, 10), month: 9, payment_year: 2026 }));
+    await assertOk(await o.from('manual_grades').insert({ id: `web-grade-row-${ts}`, center_id: centerId, student_id: studentId, title: 'تقييم ويب', score: 9, max_score: 10, month: 9, grade_year: 2026 }));
     await assertOk(await o.from('announcements').insert({ id: `web-ann-${ts}`, center_id: centerId, title: 'إعلان ويب', body: 'اختبار' }));
     await assertOk(await o.from('app_notifications').insert({ id: `web-not-${ts}`, center_id: centerId, audience: 'all', title: 'تنبيه ويب', body: 'اختبار' }));
   });

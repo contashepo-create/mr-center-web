@@ -4,6 +4,7 @@
 // ============================================================
 
 import { getSupabase } from './supabase';
+import { getDeviceId } from './visitors';
 import { sendSupportMessage } from './api';
 
 export interface MyFeatures {
@@ -89,6 +90,32 @@ export async function devSetDeviceBlocked(deviceId: string, blocked: boolean): P
   if (error) throw error;
 }
 
+/** آخر نشاط للحساب الحالي. الجهاز معرف محلي عشوائي، وليس عنوان IP أو بصمة عتاد. */
+export async function touchMyAccountPresence(): Promise<void> {
+  const { error } = await getSupabase().rpc('touch_my_account_presence', {
+    p_device_id: getDeviceId(), p_platform: 'web',
+  });
+  if (error) throw error;
+}
+
+export interface CenterOwnerPresence {
+  account_id: string;
+  center_id: string;
+  center_name: string;
+  center_code: string;
+  owner_name: string;
+  owner_email: string | null;
+  last_seen: string | null;
+  platform: string | null;
+}
+
+/** آخر ظهور لصاحب كل سنتر — المطور فقط، من سجل حضور الحساب لا من IP. */
+export async function devListCenterOwnerPresence(): Promise<CenterOwnerPresence[]> {
+  const { data, error } = await getSupabase().rpc('dev_list_center_owner_presence');
+  if (error) throw error;
+  return (Array.isArray(data) ? data : []) as CenterOwnerPresence[];
+}
+
 /** المطور يفعّل/يوقف المحاسبة لسنتر محدد */
 export async function devSetAccounting(centerId: string, enabled: boolean): Promise<void> {
   const { error } = await getSupabase().rpc('dev_set_accounting', { p_center: centerId, p_enabled: enabled });
@@ -112,21 +139,28 @@ export async function devGetAccountingState(centerId: string): Promise<Accountin
     .eq('center_id', centerId)
     .eq('feature_key', 'accounting')
     .maybeSingle();
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
   const { data: sub } = await sb
     .from('center_subscriptions')
-    .select('enabled_features')
+    .select('enabled_features,starts_on,ends_on')
     .eq('center_id', centerId)
     .eq('status', 'active')
+    .lte('starts_on', today)
+    .gte('ends_on', today)
     .order('ends_on', { ascending: false })
     .limit(1)
     .maybeSingle();
 
   const e = (ent ?? null) as { starts_on: string | null; ends_on: string | null; is_open_ended: boolean | null } | null;
-  const now = new Date();
   const entActive = !!e
     && !!e.starts_on && new Date(e.starts_on) <= now
     && (!!e.is_open_ended || (e.ends_on ? new Date(e.ends_on) >= now : false));
-  const subFlag = (sub as { enabled_features?: Record<string, unknown> } | null)?.enabled_features?.accounting === true;
+  const subscription = sub as { enabled_features?: Record<string, unknown>; starts_on?: string | null; ends_on?: string | null } | null;
+  // لا تعرض لوحة المطور خدمة منتهية كأنها مفعلة؛ نفس قاعدة الدالة الخادمية.
+  const subFlag = subscription?.enabled_features?.accounting === true
+    && (!subscription.starts_on || subscription.starts_on <= today)
+    && (!subscription.ends_on || subscription.ends_on >= today);
 
   return {
     enabled: subFlag || entActive,

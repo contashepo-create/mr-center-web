@@ -31,7 +31,7 @@ export function answerLabel(q: ExamQuestion, a: ExamAnswer | undefined): string 
     case 'mcq':
       return typeof a === 'number' ? (q.choices[a] ?? 'لم تُجب') : 'لم تُجب';
     case 'tf':
-      return a === 1 ? 'صح' : a === 0 ? 'خطأ' : 'لم تُجب';
+      return a === 0 ? 'صح' : a === 1 ? 'خطأ' : 'لم تُجب';
     case 'multi':
       return Array.isArray(a) && a.length > 0 ? a.map((i) => q.choices[i]).filter(Boolean).join('، ') : 'لم تُجب';
     case 'match': {
@@ -52,7 +52,7 @@ export function correctLabel(q: ExamQuestion, model: ExamAnswer | undefined): st
     case 'mcq':
       return typeof model === 'number' ? (q.choices[model] ?? '—') : '—';
     case 'tf':
-      return model === 1 ? 'صح' : model === 0 ? 'خطأ' : '—';
+      return model === 0 ? 'صح' : model === 1 ? 'خطأ' : '—';
     case 'multi':
       return Array.isArray(model) && model.length > 0 ? model.map((i) => q.choices[i]).filter(Boolean).join('، ') : '—';
     case 'match': {

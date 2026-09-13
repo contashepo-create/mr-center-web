@@ -6,8 +6,18 @@
 // ============================================================
 
 import { getSupabase } from './supabase';
+import { getDeviceId } from './visitors';
 
 const KEY = 'mrcenter.web.session.key';
+// لا نحول انقطاعاً عابراً في شبكة Supabase إلى طلب RPC كل 30 ثانية ورسائل
+// ERR_CONNECTION_CLOSED متكررة في DevTools. يبقى فحص الجلسة الأمني فور عودة
+// أول رد ناجح، بينما الخطأ المؤقت لا يطرد المستخدم (وهو السلوك المقصود).
+const TRANSIENT_FAILURE_COOLDOWN_MS = 2 * 60 * 1000;
+let retrySessionCheckAfter = 0;
+
+function deferSessionCheck(): void {
+  retrySessionCheckAfter = Date.now() + TRANSIENT_FAILURE_COOLDOWN_MS;
+}
 
 function generateKey(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
@@ -22,6 +32,16 @@ function readKey(): string {
 function writeKey(key: string): void {
   if (typeof window === 'undefined') return;
   try { window.localStorage.setItem(KEY, key); } catch { /* ignore */ }
+}
+
+/** يسجل متصفح الطالب في سجل جهاز سنتره فقط، بلا تأثير على حجب الزوار العام. */
+export async function registerMyStudentDevice(): Promise<void> {
+  try {
+    const device = getDeviceId();
+    if (device) await getSupabase().rpc('register_current_student_device', { p_device: device });
+  } catch {
+    // توافق آمن مع قواعد بيانات لم يطبّق عليها الترحيل بعد أو اتصال مؤقت.
+  }
 }
 
 /**
@@ -39,6 +59,7 @@ export async function claimMySession(): Promise<void> {
       writeKey(key);
     }
     await sb.rpc('claim_session', { p_key: key });
+    await registerMyStudentDevice();
   } catch {
     // لا نمنع الدخول إن لم يُطبَّق الترحيل بعد أو فشل الاتصال مؤقتاً
   }
@@ -49,13 +70,37 @@ export async function claimMySession(): Promise<void> {
  * يُرجع true عند أي فشل مؤقت (حتى لا يُحجب المستخدم بلا داعٍ).
  */
 export async function isMySessionCurrent(): Promise<boolean> {
+  // لا يوجد اتصال معلن من المتصفح، أو أن طلباً سابقاً انقطع: لا نرسل طلباً
+  // محكوماً بالفشل. نتحقق فور انتهاء المهلة أو عودة الشبكة في الفحص التالي.
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return true;
+  if (Date.now() < retrySessionCheckAfter) return true;
+
   try {
     const key = readKey();
-    if (!key) return true; // لا مفتاح مسجل — لا نفرض حجباً
-    const { data, error } = await getSupabase().rpc('check_session', { p_key: key });
-    if (error) return true;
-    return data !== false;
+    const sb = getSupabase();
+    if (key) {
+      const { data, error } = await sb.rpc('check_session', { p_key: key });
+      if (error) {
+        deferSessionCheck();
+        return true;
+      }
+      retrySessionCheckAfter = 0;
+      if (data === false) return false;
+    }
+    // فحص إضافي لحجب جهاز الطالب المسجل لهذا السنتر فقط. إن لم يطبّق
+    // الترحيل بعد نتجاهل الخطأ كي لا نحجب مستخدماً بلا داعٍ.
+    const device = getDeviceId();
+    if (device) {
+      const access = await sb.rpc('check_current_student_device', { p_device: device });
+      if (access.error) {
+        deferSessionCheck();
+        return true;
+      }
+      if (access.data === false) return false;
+    }
+    return true;
   } catch {
+    deferSessionCheck();
     return true;
   }
 }
