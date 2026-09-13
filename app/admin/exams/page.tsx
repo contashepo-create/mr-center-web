@@ -199,6 +199,8 @@ function QuestionEditor({ q, answer, index, onQuestion, onAnswer, onDelete, onMo
   </div>;
 }
 
+type ExamCreateMode = 'paper' | 'online';
+
 export default function AdminExamsPage() {
   const { profile } = useSession();
   const toast = useToast();
@@ -218,6 +220,8 @@ export default function AdminExamsPage() {
   const [preview, setPreview] = useState(false);
   const [previewMode, setPreviewMode] = useState<'paper' | 'electronic'>('paper');
   const [workspace, setWorkspace] = useState<'library' | 'builder'>('library');
+  const [chooseTypeOpen, setChooseTypeOpen] = useState(false);
+  const [createMode, setCreateMode] = useState<ExamCreateMode>('online');
   const [librarySearch, setLibrarySearch] = useState('');
   const [libraryGrade, setLibraryGrade] = useState('all');
   const [libraryStatus, setLibraryStatus] = useState<'all' | 'published' | 'draft'>('all');
@@ -259,9 +263,15 @@ export default function AdminExamsPage() {
   const addQuestion = (type: ExamQuestionType) => { const q = newQuestion(type); setQuestions((old) => [...old, q]); setAnswers((old) => [...old, defaultAnswer(q)]); };
   const removeQuestion = (idx: number) => { if (questions.length === 1) return; setQuestions((old) => old.filter((_, i) => i !== idx)); setAnswers((old) => old.filter((_, i) => i !== idx)); };
 
-  const reset = () => { setWorkspace('builder'); setSelected(null); setAttempts([]); setManualScores({}); setForm({ id: '', title: '', subject: '', grade_id: '', duration: '30', attempts: '1', show_result: 'end', is_published: false }); setQuestions([newQuestion('mcq')]); setAnswers([0]); setOrnaments(defaultOrnaments('')); };
+  const reset = () => { setSelected(null); setAttempts([]); setManualScores({}); setForm({ id: '', title: '', subject: '', grade_id: '', duration: '30', attempts: '1', show_result: 'end', is_published: false }); setQuestions([newQuestion('mcq')]); setAnswers([0]); setOrnaments(defaultOrnaments('')); };
+  const beginCreate = (mode: ExamCreateMode) => {
+    reset(); setCreateMode(mode); setPreviewMode(mode === 'paper' ? 'paper' : 'electronic'); setChooseTypeOpen(false); setWorkspace('builder');
+    window.setTimeout(() => window.scrollTo({ top: 0, behavior: 'smooth' }), 0);
+  };
   const edit = async (exam: AppExam) => {
     setWorkspace('builder');
+    setCreateMode(exam.is_published ? 'online' : 'paper');
+    setPreviewMode(exam.is_published ? 'electronic' : 'paper');
     setSelected(exam);
     setForm({ id: exam.id, title: exam.title, subject: exam.subject, grade_id: exam.grade_id ?? '', duration: String(exam.duration_minutes), attempts: String(exam.attempts_allowed ?? 1), show_result: (exam.show_result ?? 'end') as ExamResultMode, is_published: exam.is_published });
     const qs = normalizeQuestions(exam.questions);
@@ -276,7 +286,7 @@ export default function AdminExamsPage() {
     catch (err) { setError(err); }
     finally { setBusy(false); }
   };
-  const remove = async (id: string) => { if (!confirm('حذف الاختبار ومحاولاته؟')) return; try { await deleteExam(id); reset(); await load(); } catch (err) { setError(err); } };
+  const remove = async (id: string) => { if (!confirm('حذف الاختبار ومحاولاته؟')) return; try { await deleteExam(id); setSelected(null); setAttempts([]); setWorkspace('library'); await load(); toast.success('تم حذف الاختبار'); } catch (err) { setError(err); } };
   const grade = async (id: string) => { const score = Number(manualScores[id]); if (Number.isNaN(score)) return; try { await gradeAttemptManually(id, score); if (selected) setAttempts(await fetchAttemptsForExam(selected.id)); } catch (err) { setError(err); } };
 
   const openReview = (a: ExamAttempt) => {
@@ -322,7 +332,7 @@ export default function AdminExamsPage() {
   };
 
   return <>
-    <PageHeader title="الاختبارات" subtitle={workspace === 'builder' ? 'محرر احترافي منظم: إعداد، أسئلة، معاينة ورقية أو إلكترونية.' : 'مكتبة الاختبارات: أنشئ، انشر، راجع المحاولات وراقب حالة كل اختبار.'} actions={<div className="row">{workspace === 'builder' ? <Button type="button" variant="secondary" onClick={() => setWorkspace('library')}>← مكتبة الاختبارات</Button> : null}<Button type="button" onClick={reset}>+ إنشاء اختبار</Button></div>} />
+    <PageHeader title="الاختبارات" subtitle={workspace === 'builder' ? 'محرر احترافي منظم: إعداد، أسئلة، معاينة ورقية أو إلكترونية.' : 'مكتبة الاختبارات: أنشئ، انشر، راجع المحاولات وراقب حالة كل اختبار.'} actions={<div className="row">{workspace === 'builder' ? <Button type="button" variant="secondary" onClick={() => setWorkspace('library')}>← مكتبة الاختبارات</Button> : null}<Button type="button" onClick={() => setChooseTypeOpen(true)}>+ إنشاء اختبار</Button></div>} />
     <ErrorNotice error={error} />
 
     {workspace === 'library' ? <>
@@ -335,12 +345,13 @@ export default function AdminExamsPage() {
       <Card className="exams-library-toolbar stack"><div className="grid grid-3"><Input label="بحث" value={librarySearch} onChange={(event) => setLibrarySearch(event.target.value)} placeholder="عنوان أو مادة أو صف" /><Select label="الصف" value={libraryGrade} onChange={(event) => setLibraryGrade(event.target.value)}><option value="all">كل الصفوف</option>{grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}</Select><Select label="الحالة" value={libraryStatus} onChange={(event) => setLibraryStatus(event.target.value as 'all' | 'published' | 'draft')}><option value="all">الكل</option><option value="published">منشور</option><option value="draft">مسودة</option></Select></div><div className="row-between"><span className="tiny muted">{filteredExams.length} اختبار مطابق</span><Button type="button" variant="ghost" onClick={() => { setLibrarySearch(''); setLibraryGrade('all'); setLibraryStatus('all'); }}>مسح الفلاتر</Button></div></Card>
       {filteredExams.length === 0 ? <Card><EmptyState title={exams.length ? 'لا توجد اختبارات مطابقة للفلاتر' : 'أنشئ أول اختبار لسنترك'} body={exams.length ? 'جرّب تغيير البحث أو الصف أو حالة النشر.' : 'اختر «إنشاء اختبار» ثم أضف أسئلة ومعاينة وانشره وقتما تكون جاهزاً.'} /></Card> : <section className="exam-library-grid">{filteredExams.map((exam) => { const gradeName = grades.find((grade) => grade.id === exam.grade_id)?.name ?? 'كل الصفوف'; const examAttempts = selected?.id === exam.id ? attempts.length : null; return <Card className="exam-library-card" key={exam.id}><div className="exam-library-card-top"><span className="exam-card-icon">📝</span><Badge tone={exam.is_published ? 'success' : 'default'}>{exam.is_published ? 'منشور' : 'مسودة'}</Badge></div><div><h2 className="h3">{exam.title}</h2><p className="muted small">{exam.subject || 'بدون مادة'} · {gradeName}</p></div><div className="exam-card-facts"><span>❔ {exam.questions.length} سؤال</span><span>★ {exam.total_score} درجة</span><span>◷ {exam.duration_minutes} دقيقة</span></div><div className="exam-card-footer"><span className="tiny muted">{examAttempts === null ? `أنشئ في ${formatDate(exam.created_at)}` : `${examAttempts} محاولة محمّلة`}</span><div className="row"><Button type="button" variant="ghost" onClick={() => void edit(exam)}>تحرير</Button><Button type="button" variant="secondary" onClick={async () => { try { await toggleExamPublished(exam.id, !exam.is_published); toast.success(exam.is_published ? 'تم إلغاء نشر الاختبار' : 'تم نشر الاختبار للطلاب'); await load(); } catch (err) { setError(err); } }}>{exam.is_published ? 'إيقاف' : 'نشر'}</Button></div></div><div className="exam-card-extra"><Button type="button" variant="ghost" onClick={() => void edit(exam)}>عرض المحاولات والتصحيح ←</Button><Button type="button" variant="ghost" onClick={() => void remove(exam.id)}>حذف</Button></div></Card>; })}</section>}
     </> : <>
-      <div className="exam-builder-steps"><span className="active">1. بيانات الاختبار</span><span>2. بناء الأسئلة</span><span>3. معاينة ونشر</span></div>
+      <div className="exam-builder-steps"><span className="active">1. إعداد {createMode === 'paper' ? 'الورقة' : 'الاختبار الإلكتروني'}</span><span>2. إضافة الأسئلة</span><span>3. معاينة وحفظ</span></div>
     <div className="exam-builder-layout">
-      <div className="stack">
+      <div className="stack exam-editor-stack">
+        <div className="exam-editor-section-title"><span>1</span><div><h2 className="h3">بيانات الاختبار</h2><p>ابدأ بالصف والعنوان وإعدادات أداء الطلاب.</p></div></div>
         <Card className="stack">
           <div className="row-between">
-            <h2 className="h3">{form.id ? `تعديل: ${form.title || 'اختبار'}` : 'إنشاء اختبار جديد'}</h2>
+            <div><h2 className="h3">{form.id ? `تعديل: ${form.title || 'اختبار'}` : 'اختبار جديد'}</h2><span className={`exam-mode-pill ${createMode}`}>{createMode === 'paper' ? '🖨 مسار ورقي / PDF' : '🖥 مسار إلكتروني'}</span></div>
             <Badge tone={validation ? 'danger' : 'success'}>{validation ? 'راجع بيانات الأسئلة' : `المجموع ${total} درجة`}</Badge>
           </div>
           <form className="stack" onSubmit={submit}>
@@ -371,6 +382,7 @@ export default function AdminExamsPage() {
           </form>
         </Card>
 
+        <div className="exam-editor-section-title"><span>2</span><div><h2 className="h3">إضافة سؤال رئيسي</h2><p>اختر النوع، ثم افتح البطاقة واكتب السؤال ومفتاح التصحيح.</p></div></div>
         <Card className="stack">
           <h3 className="h3">أنواع الأسئلة — اضغط لإضافة سؤال</h3>
           <div className="exam-type-palette">
@@ -383,9 +395,11 @@ export default function AdminExamsPage() {
           </div>
         </Card>
 
-        <Card className="stack">
+        <details className="exam-appearance-panel">
+          <summary>🎨 تخصيص شكل الورقة والزخارف (اختياري)</summary>
+        <Card className="stack" style={{ marginTop: 12 }}>
           <div className="row-between">
-            <h3 className="h3">🎨 زخارف ورقة الاختبار</h3>
+            <h3 className="h3">زخارف ورقة الاختبار</h3>
             <Button type="button" variant="secondary" onClick={() => setOrnaments({ ...ornaments, kinds: ornamentsForSubject(form.subject).map((o) => o.kind) })}>تعبئة حسب المادة ({subjectLabelFor(form.subject)})</Button>
           </div>
           <div className="grid grid-3">
@@ -415,7 +429,9 @@ export default function AdminExamsPage() {
           </details>
           {ornaments.placement === 'manual' ? <Notice tone="info">وضع الأختام اليدوي يتم من المعاينة (ورقي): اختر ختماً ثم اضغط على الورقة لوضعه، أو استخدم «توزيع عشوائي».</Notice> : null}
         </Card>
+        </details>
 
+        <div className="exam-editor-section-title"><span>3</span><div><h2 className="h3">الأسئلة التي أضفتها</h2><p>يمكنك فتح سؤال واحد في كل مرة، ثم تغيير ترتيبه أو حذفه.</p></div><Badge tone="info">{questions.length} سؤال</Badge></div>
         {questions.map((q, i) => (
           <QuestionEditor key={i} q={q} answer={answers[i]} index={i} onQuestion={(next) => updateQuestion(i, next)} onAnswer={(next) => updateAnswer(i, next)} onDelete={() => removeQuestion(i)} onMove={(d) => move(i, d)} />
         ))}
@@ -484,6 +500,14 @@ export default function AdminExamsPage() {
         )}
       </Card>
     ) : null}
+
+    <Modal open={chooseTypeOpen} title="اختر طريقة إنشاء الاختبار" subtitle="كما في مركز Publish: اختر مسار الإدخال أولاً، ثم ابدأ المحرر المناسب." onClose={() => setChooseTypeOpen(false)} wide footer={<Button type="button" variant="ghost" onClick={() => setChooseTypeOpen(false)}>إلغاء</Button>}>
+      <div className="exam-create-choices">
+        <button type="button" className="exam-create-choice paper" onClick={() => beginCreate('paper')}><span className="exam-create-icon">🖨</span><strong>اختبار ورقي</strong><span>أدخل الأسئلة، عاين ورقة امتحانية مصرية، ثم اطبعها أو احفظها PDF.</span><em>ورقة مطبوعة</em></button>
+        <button type="button" className="exam-create-choice online" onClick={() => beginCreate('online')}><span className="exam-create-icon">🖥</span><strong>اختبار إلكتروني</strong><span>أدخل الأسئلة وانشر الاختبار للطلاب عند اكتماله، مع المحاولات والتصحيح الحاليين.</span><em>أداء إلكتروني ونتائج</em></button>
+      </div>
+      <Notice tone="info">طريقة الإدخال لا تلغي أي ميزة حالية: تستطيع دائماً معاينة الورقة أو العرض الإلكتروني، وتتحكم بالنشر وظهور النتيجة قبل الحفظ.</Notice>
+    </Modal>
 
     <Modal
       open={preview}

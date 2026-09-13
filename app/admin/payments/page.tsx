@@ -5,11 +5,13 @@ import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader
 import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
+import { CollectionQrScanner } from '@/components/payments/collection-qr-scanner';
 import { fetchDues, fetchGroups, fetchPaymentsForMonth, fetchStudents, generateDuesForGroup, recordPayment } from '@/lib/api';
 import type { Due, Group, Payment, Student } from '@/lib/types';
 import { can } from '@/lib/rbac';
 import { useTeacherGroupIds } from '@/lib/staff';
-import { arabicMonth, formatDate, formatMoney } from '@/lib/utils';
+import { arabicMonth, formatDate, formatMoney, todayIso } from '@/lib/utils';
+import { decodeStudentQr, isQrFresh } from '@/lib/qr';
 
 export default function PaymentsPage() {
   const { profile } = useSession();
@@ -81,6 +83,19 @@ export default function PaymentsPage() {
     setPayOpen(true);
   };
 
+  /** QR اليومي يحدد الطالب، ثم ننتقي مستحقه غير المسدد في الشهر المفتوح فقط. */
+  const openCollectFromQr = async (raw: string) => {
+    if (!centerId) throw new Error('اختر السنتر أولاً.');
+    const decoded = decodeStudentQr(raw);
+    if (!decoded) throw new Error('رمز QR غير صالح. امسح رمز الطالب الصادر من حسابه.');
+    if (decoded.centerId !== centerId) throw new Error('هذا الرمز لا يخص سنترك.');
+    if (!isQrFresh(decoded, todayIso())) throw new Error('رمز الطالب منتهي أو ليس رمز اليوم. اطلب منه فتح رمز اليوم من حسابه.');
+    const due = visibleDues.find((item) => item.student_id === decoded.studentId && item.status !== 'paid');
+    if (!due) throw new Error('لا يوجد مستحق غير مسدد لهذا الطالب في الشهر المحدد. غيّر الشهر أو راجع المستحقات.');
+    openCollect(due);
+    toast.info('تم التعرف على الطالب', 'راجع المبلغ ثم أكد تسجيل الدفعة.');
+  };
+
   const collect = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!centerId || !pay.dueId) return;
@@ -104,7 +119,7 @@ export default function PaymentsPage() {
 
   return (
     <>
-      <PageHeader title="المدفوعات والمستحقات" subtitle="توليد مستحقات شهرية وتسجيل التحصيل على نفس جداول التطبيق." />
+      <PageHeader title="المدفوعات والمستحقات" subtitle="توليد مستحقات شهرية وتسجيل التحصيل، أو اختيار مستحق الطالب سريعاً برمز QR." actions={<CollectionQrScanner onScanned={openCollectFromQr} />} />
       <ErrorNotice error={error} />
       {message ? <Notice tone="success">{message}</Notice> : null}
 
