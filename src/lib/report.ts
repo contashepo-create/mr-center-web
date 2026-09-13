@@ -53,11 +53,25 @@ function reportLogoSpace(branding: CenterPrintBranding): number {
   return branding.logo_url ? Math.max(56, Math.min(132, branding.logo_size + 22)) : 0;
 }
 
+function printLogoHeightMm(branding: CenterPrintBranding): number {
+  // صندوق الشعار في مستند الطباعة مربع بمقاس logo_size وobject-fit:contain،
+  // لذلك يكون هذا الارتفاع حدّاً حقيقياً حتى لا يغطي شعار طويل محتوى صفحة لاحقة.
+  return Math.min(24, Math.max(6, branding.logo_size / 3.78));
+}
+
 function printBottomMarginMm(branding: CenterPrintBranding, minimum: number): number {
   if (!branding.logo_url || !['bottom_right', 'bottom_left'].includes(branding.logo_position)) return minimum;
-  // أقصى ارتفاع الشعار في CSS هو 24mm. الحجز يتبع المقاس المختار ويترك فاصلًا للتذييل.
-  const estimatedLogoHeight = Math.min(24, Math.max(6, branding.logo_size / 3.78));
-  return Math.max(minimum, Math.ceil(5 + estimatedLogoHeight + 5));
+  return Math.max(minimum, Math.ceil(5 + printLogoHeightMm(branding) + 5));
+}
+
+/**
+ * الشعار الثابت يتكرر في كل صفحة PDF. نحجز له هامشاً في الصفحات التالية فقط؛
+ * الصفحة الأولى تستخدم رأس المستند الذي يحجز موضع الشعار بنفسه، فلا نخلق
+ * مساحة فارغة أو صفحة زائدة عندما يكون المستند من صفحة واحدة.
+ */
+function repeatedPageTopMarginMm(branding: CenterPrintBranding, minimum: number, logoTopMm: number): number {
+  if (!branding.logo_url || !['top_right', 'top_left', 'top_center'].includes(branding.logo_position)) return minimum;
+  return Math.max(minimum, Math.ceil(logoTopMm + printLogoHeightMm(branding) + 5));
 }
 
 /** حجز رأس الورقة حتى لو تغيرت هوية الطباعة بعد فتح المعاينة. */
@@ -79,7 +93,7 @@ export function documentBrandingMarkup(branding: CenterPrintBranding): string {
       style="opacity:${branding.watermark_opacity};--watermark-font-size:${branding.watermark_font_size}px;--watermark-image-size:${branding.watermark_image_size}px;--watermark-color:${esc(branding.watermark_color)};--watermark-columns:${watermarkGridColumns(branding)}">
       <div class="print-watermark-grid">${watermarkMarks}</div>
     </div>` : '';
-  const logo = branding.logo_url ? `<img class="center-print-logo ${esc(branding.logo_position)}" style="width:${branding.logo_size}px" src="${esc(branding.logo_url)}" alt="شعار ${esc(branding.center_name)}" />` : '';
+  const logo = branding.logo_url ? `<img class="center-print-logo ${esc(branding.logo_position)}" style="width:${branding.logo_size}px;height:${branding.logo_size}px" src="${esc(branding.logo_url)}" alt="شعار ${esc(branding.center_name)}" />` : '';
   const footer = esc(documentFooterText(branding));
   // العلامة عنصر ثابت مستقل عن الشعار والتذييل: بذلك يمكن أن تكون فوق محتوى
   // المستند فعلاً (أو خلفه عند اختيار ذلك) من دون أن يحبسها سياق تراكب الأب.
@@ -107,6 +121,8 @@ export function buildReportHtml(title: string, subtitle: string, sections: Repor
   const logoClass = reportLogoClass(branding);
   const logoSpace = reportLogoSpace(branding);
   const bottomMargin = printBottomMarginMm(branding, 19);
+  // في التقارير يتحرك الشعار العلوي 15mm ليجاور الرأس في الصفحة الأولى.
+  const repeatedTopMargin = repeatedPageTopMarginMm(branding, 13, 15);
   const body = sections.map((section, index) => {
     const headers = section.headers ?? [];
     const tableHead = headers.length ? `<thead><tr>${headers.map((header) => `<th>${esc(header)}</th>`).join('')}</tr></thead>` : '';
@@ -115,7 +131,7 @@ export function buildReportHtml(title: string, subtitle: string, sections: Repor
   }).join('');
   return `<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>${esc(pdfDocumentTitle(title))}</title><style>
-    @page{size:A4;margin:13mm 11mm ${bottomMargin}mm}*{box-sizing:border-box}html{background:#eef4f1}body{margin:0;background:#fff;color:#16231f;font-family:"Tahoma","Arial",sans-serif;direction:rtl;font-size:12px;line-height:1.65;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    @page{size:A4;margin:${repeatedTopMargin}mm 11mm ${bottomMargin}mm}@page :first{margin:13mm 11mm ${bottomMargin}mm}*{box-sizing:border-box}html{background:#eef4f1}body{margin:0;background:#fff;color:#16231f;font-family:"Tahoma","Arial",sans-serif;direction:rtl;font-size:12px;line-height:1.65;-webkit-print-color-adjust:exact;print-color-adjust:exact}
     ${documentBrandingCss()}
     .report-shell{position:relative;z-index:1;max-width:210mm;margin:0 auto;padding:0 0 14px;--report-logo-space:0px}.report-head{position:relative;overflow:hidden;padding:19px 24px 16px;background:linear-gradient(135deg,#064e3b 0%,#08765a 58%,#0b9c73 100%);color:#fff;border-bottom:5px solid #d7a931}.report-head:after{content:"";position:absolute;width:155px;height:155px;border:1px solid rgba(255,255,255,.25);border-radius:50%;left:-45px;top:-75px;box-shadow:0 0 0 24px rgba(255,255,255,.07),0 0 0 49px rgba(255,255,255,.05)}.report-shell.has-print-logo.top_right .report-head{padding-right:calc(24px + var(--report-logo-space))}.report-shell.has-print-logo.top_left .report-head{padding-left:calc(24px + var(--report-logo-space))}.report-shell.has-print-logo.top_center .report-head{padding-top:calc(16px + var(--report-logo-space))}body:has(.report-shell.has-print-logo) .center-print-logo.top_right,body:has(.report-shell.has-print-logo) .center-print-logo.top_left,body:has(.report-shell.has-print-logo) .center-print-logo.top_center{top:15mm}
     .brand{position:relative;z-index:1;display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.brand-mark{display:flex;align-items:center;gap:10px;font-weight:700;font-size:13px;letter-spacing:.1px}.mark{display:inline-grid;place-items:center;width:31px;height:31px;border:1px solid rgba(255,255,255,.65);border-radius:10px;color:#f9d66a;font-size:17px}.report-type{margin:14px 0 2px;font-size:22px;line-height:1.3;font-weight:800}.report-subtitle{opacity:.88;font-size:12px}.report-code{position:relative;z-index:1;text-align:left;font-size:10px;opacity:.9;white-space:nowrap}
@@ -164,9 +180,10 @@ export function printExamPaper(branding: CenterPrintBranding = brandForCenter('M
   const printable = paper.closest('.stamp-canvas') ?? paper;
   const styles = Array.from(document.querySelectorAll('style, link[rel="stylesheet"]')).map((node) => node.outerHTML).join('\n');
   const bottomMargin = printBottomMarginMm(branding, 17);
+  const repeatedTopMargin = repeatedPageTopMarginMm(branding, 10, 5);
   const logoReservation = examPaperLogoReservationCss(branding);
   printReport(`<!doctype html><html dir="rtl" lang="ar"><head><meta charset="utf-8" /><title>${esc(examPdfDocumentTitle(details, paper))}</title>${styles}<style>
-    @page{size:A4;margin:10mm 10mm ${bottomMargin}mm}html,body{background:#fff!important}body{padding:0!important}${documentBrandingCss()}.print-exam-wrap{position:relative;z-index:1;width:100%;margin:0 auto}.exam-paper{width:100%;max-width:none!important;box-shadow:none!important}${logoReservation}@media print{.exam-paper{break-inside:auto}.exam-paper-section,.exam-paper-item{break-inside:avoid}.exam-paper .paper-preview-branding,.exam-paper .exam-paper-bottom-note{display:none!important}/* نثبت الورقة داخل إطار PDF في تدفق الصفحات الطبيعي حتى يظهر كامل محتوى الأسئلة. */body:has(.exam-paper) .print-exam-wrap{display:block!important;position:static!important;visibility:visible!important}body:has(.exam-paper) .print-exam-wrap .stamp-canvas{display:block!important;position:relative!important;height:auto!important;visibility:visible!important}body:has(.exam-paper) .print-exam-wrap .exam-paper{display:block!important;position:relative!important;inset:auto!important;height:auto!important;min-height:0!important;width:100%!important;max-width:none!important;margin:0!important;visibility:visible!important}/* يتغلب صراحةً على قاعدة المعاينة العامة التي تخفي أبناء body عند طباعة الاختبار. */body:has(.exam-paper) .print-exam-wrap *,body:has(.exam-paper) .exam-paper *,body:has(.exam-paper) .center-print-overlay,body:has(.exam-paper) .center-print-overlay *,body:has(.exam-paper) .center-print-watermark,body:has(.exam-paper) .center-print-watermark *{visibility:visible!important}}
+    @page{size:A4;margin:${repeatedTopMargin}mm 10mm ${bottomMargin}mm}@page :first{margin:10mm 10mm ${bottomMargin}mm}html,body{background:#fff!important}body{padding:0!important}${documentBrandingCss()}.print-exam-wrap{position:relative;z-index:1;width:100%;margin:0 auto}.exam-paper{width:100%;max-width:none!important;box-shadow:none!important}${logoReservation}@media print{.exam-paper{break-inside:auto}.exam-paper-section,.exam-paper-item{break-inside:avoid}.exam-paper .paper-preview-branding,.exam-paper .exam-paper-bottom-note{display:none!important}/* نثبت الورقة داخل إطار PDF في تدفق الصفحات الطبيعي حتى يظهر كامل محتوى الأسئلة. */body:has(.exam-paper) .print-exam-wrap{display:block!important;position:static!important;visibility:visible!important}body:has(.exam-paper) .print-exam-wrap .stamp-canvas{display:block!important;position:relative!important;height:auto!important;visibility:visible!important}body:has(.exam-paper) .print-exam-wrap .exam-paper{display:block!important;position:relative!important;inset:auto!important;height:auto!important;min-height:0!important;width:100%!important;max-width:none!important;margin:0!important;visibility:visible!important}/* يتغلب صراحةً على قاعدة المعاينة العامة التي تخفي أبناء body عند طباعة الاختبار. */body:has(.exam-paper) .print-exam-wrap *,body:has(.exam-paper) .exam-paper *,body:has(.exam-paper) .center-print-overlay,body:has(.exam-paper) .center-print-overlay *,body:has(.exam-paper) .center-print-watermark,body:has(.exam-paper) .center-print-watermark *{visibility:visible!important}}
   </style></head><body>${documentBrandingMarkup(branding)}<main class="print-exam-wrap">${printable.outerHTML}</main></body></html>`);
 }
 
