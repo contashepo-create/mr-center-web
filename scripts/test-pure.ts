@@ -31,7 +31,7 @@ import { toWaNumber, waLink } from '../src/lib/whatsapp';
 import { shouldExposeStoredSession } from '../src/lib/auth/clientSession';
 import { operatingExpense, periodTotals, summarizeEmployeePayroll } from '../src/lib/accounting';
 import { paperSections } from '../src/lib/exam-egyptian';
-import { brandForCenter, normalizeCenterPrintSettings } from '../src/lib/printing';
+import { brandForCenter, documentFooterText, normalizeCenterPrintSettings, watermarkGridColumns, watermarkRepeatCount } from '../src/lib/printing';
 
 function profile(role: Profile['role'], perms: Profile['perms'] = {}, active = true): Profile {
   return {
@@ -78,10 +78,16 @@ assert.deepEqual(paperSections([
   { type: 'mcq', q: 'ج', choices: [], marks: 1, sectionId: 'second' },
 ]).map((section) => [section.sectionId, section.items.length, section.marks]), [['first', 2, 2], ['second', 1, 1]]);
 const printSettings = normalizeCenterPrintSettings({ watermark_opacity: 2, logo_size: 300, logo_position: 'bad' as any, watermark_image: 'javascript:alert(1)' });
-assert.equal(printSettings.watermark_opacity, 0.32);
+assert.equal(printSettings.watermark_opacity, 0.55);
 assert.equal(printSettings.logo_size, 110);
 assert.equal(printSettings.logo_position, 'top_right');
 assert.equal(printSettings.watermark_image, '');
+assert.equal(printSettings.watermark_pattern, 'single');
+assert.equal(printSettings.watermark_layer, 'front');
+const tiledBrand = brandForCenter('سنتر النجاح', { watermark_pattern: 'staggered', watermark_repeat_count: 12, footer_show_center_name: false, footer_address: 'طلخا', footer_show_address: true });
+assert.equal(watermarkRepeatCount(tiledBrand), 12);
+assert.equal(watermarkGridColumns(tiledBrand), 5);
+assert.equal(documentFooterText(tiledBrand), 'طلخا');
 assert.equal(brandForCenter('سنتر النجاح', { watermark_text: '' }).watermark_text, '');
 assert.deepEqual(seededShuffle(5, 'abc').sort(), [0, 1, 2, 3, 4]);
 assert.equal(findGroupConflicts([

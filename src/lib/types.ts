@@ -476,10 +476,19 @@ export interface MyNotification {
 
 export type PrintLogoPosition = 'top_right' | 'top_left' | 'top_center' | 'bottom_right' | 'bottom_left';
 export type PrintWatermarkDirection = 'diagonal' | 'vertical' | 'horizontal';
+export type PrintWatermarkPattern = 'single' | 'grid' | 'staggered';
+export type PrintWatermarkLayer = 'front' | 'behind';
 
 /** هوية كل مستند مطبوع من السنتر: شعار وتذييل وعلامة مائية. */
 export interface CenterPrintSettings {
+  /** عناصر التذييل مستقلة كي يختار المالك الاسم والعنوان الظاهرين. */
   footer_address: string;
+  footer_enabled: boolean;
+  footer_show_center_name: boolean;
+  footer_show_address: boolean;
+  footer_font_size: number;
+  /** اسم السنتر في ترويسة المستند/ورقة الاختبار. */
+  header_show_center_name: boolean;
   logo_url: string;
   logo_position: PrintLogoPosition;
   logo_size: number;
@@ -488,6 +497,13 @@ export interface CenterPrintSettings {
   watermark_image: string;
   watermark_opacity: number;
   watermark_direction: PrintWatermarkDirection;
+  watermark_pattern: PrintWatermarkPattern;
+  watermark_repeat_count: number;
+  watermark_font_size: number;
+  watermark_image_size: number;
+  watermark_color: string;
+  /** أمام المحتوى = مقروءة فوق الأسئلة والجداول؛ خلفه خيار متاح للتصميم الهادئ. */
+  watermark_layer: PrintWatermarkLayer;
 }
 
 export interface CenterSettings {

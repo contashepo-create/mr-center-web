@@ -15,13 +15,14 @@ import { EXAM_TYPE_LABEL } from '@/lib/utils';
 import { arabicNum, CHOICE_KEYS, paperSections } from '@/lib/exam-egyptian';
 import { PaperOrnaments, QuestionImage } from './ornaments';
 import { ExamQuestionInput, UnderlinedQuestionText } from './interactive-input';
+import { WatermarkPreview } from '@/components/printing/watermark-preview';
+import { documentFooterText } from '@/lib/printing';
 
 /** معاينة الهوية في المحرر فقط؛ نسخة الطباعة تضيف طبقة ثابتة تتكرر بكل صفحة. */
 function PaperPreviewBranding({ branding }: { branding: CenterPrintBranding | null | undefined }) {
   if (!branding) return null;
-  const watermarkText = branding.watermark_text.trim() || branding.center_name;
   return <>
-    {branding.watermark_enabled ? <div className={`paper-preview-branding paper-preview-watermark ${branding.watermark_direction}`} style={{ opacity: branding.watermark_opacity }} aria-hidden="true">{branding.watermark_image ? <img src={branding.watermark_image} alt="" /> : null}<span>{watermarkText}</span></div> : null}
+    <WatermarkPreview branding={branding} className="paper-preview-branding paper-preview-watermark" />
     {branding.logo_url ? <img className={`paper-preview-branding paper-preview-logo ${branding.logo_position}`} style={{ width: branding.logo_size }} src={branding.logo_url} alt={`شعار ${branding.center_name}`} /> : null}
   </>;
 }
@@ -52,13 +53,15 @@ export function ExamPaper({
   template?: PaperTemplate;
 }) {
   const sections = paperSections(questions);
+  const paperCenterName = branding ? (branding.header_show_center_name ? branding.center_name : '') : (centerName ?? '');
+  const paperFooter = branding ? documentFooterText(branding) : (centerName ?? '');
   return (
     <div className={`exam-paper exam-paper-${template}`} dir="rtl">
       <PaperOrnaments ornaments={ornaments} />
       <PaperPreviewBranding branding={branding} />
       <div className="exam-paper-inner">
         <div className="exam-paper-head">
-          {(branding?.center_name || centerName) ? <div className="exam-paper-center">{branding?.center_name || centerName}</div> : null}
+          {paperCenterName ? <div className="exam-paper-center">{paperCenterName}</div> : null}
           <h2 className="exam-paper-title">{title || 'اختبار'}</h2>
           <div className="exam-paper-sub">
             {subject ? <span>المادة: {subject}</span> : null}
@@ -91,7 +94,7 @@ export function ExamPaper({
         </div>
 
         <div className="exam-paper-footer">{footerText?.trim() || 'انتهت الأسئلة — بالتوفيق والنجاح 🌟'}</div>
-        {(branding?.center_name || centerName) ? <div className="exam-paper-bottom-note">{branding?.center_name || centerName}{branding?.footer_address ? ` — ${branding.footer_address}` : ''}</div> : null}
+        {paperFooter ? <div className="exam-paper-bottom-note" style={{ fontSize: `${branding?.footer_font_size ?? 9}px` }}>{paperFooter}</div> : null}
       </div>
     </div>
   );
