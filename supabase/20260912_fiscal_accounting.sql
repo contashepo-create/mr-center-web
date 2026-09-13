@@ -112,6 +112,8 @@ RETURNS BOOLEAN LANGUAGE sql STABLE SECURITY DEFINER SET search_path = public AS
       SELECT (enabled_features ->> 'accounting')::boolean
       FROM public.center_subscriptions
       WHERE center_id = p_center AND status = 'active'
+        AND starts_on <= CURRENT_DATE
+        AND ends_on >= CURRENT_DATE
       ORDER BY ends_on DESC NULLS LAST LIMIT 1
     ), false)
     OR EXISTS (
@@ -165,6 +167,9 @@ DECLARE v_role TEXT; v_center UUID; v_result JSONB;
 BEGIN
   SELECT role, center_id INTO v_role, v_center FROM public.profiles WHERE id = auth.uid();
   IF v_role NOT IN ('center_admin','super_admin') OR v_center IS NULL THEN RETURN '[]'::jsonb; END IF;
+  IF v_role = 'center_admin' AND NOT public.center_accounting_enabled(v_center) THEN
+    RAISE EXCEPTION 'accounting_not_enabled';
+  END IF;
   SELECT COALESCE(jsonb_agg(to_jsonb(t) ORDER BY t.starts_on DESC), '[]'::jsonb) INTO v_result
   FROM (
     SELECT id, center_id, year_label, starts_on, ends_on, status,

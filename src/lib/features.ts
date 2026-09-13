@@ -112,21 +112,28 @@ export async function devGetAccountingState(centerId: string): Promise<Accountin
     .eq('center_id', centerId)
     .eq('feature_key', 'accounting')
     .maybeSingle();
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
   const { data: sub } = await sb
     .from('center_subscriptions')
-    .select('enabled_features')
+    .select('enabled_features,starts_on,ends_on')
     .eq('center_id', centerId)
     .eq('status', 'active')
+    .lte('starts_on', today)
+    .gte('ends_on', today)
     .order('ends_on', { ascending: false })
     .limit(1)
     .maybeSingle();
 
   const e = (ent ?? null) as { starts_on: string | null; ends_on: string | null; is_open_ended: boolean | null } | null;
-  const now = new Date();
   const entActive = !!e
     && !!e.starts_on && new Date(e.starts_on) <= now
     && (!!e.is_open_ended || (e.ends_on ? new Date(e.ends_on) >= now : false));
-  const subFlag = (sub as { enabled_features?: Record<string, unknown> } | null)?.enabled_features?.accounting === true;
+  const subscription = sub as { enabled_features?: Record<string, unknown>; starts_on?: string | null; ends_on?: string | null } | null;
+  // لا تعرض لوحة المطور خدمة منتهية كأنها مفعلة؛ نفس قاعدة الدالة الخادمية.
+  const subFlag = subscription?.enabled_features?.accounting === true
+    && (!subscription.starts_on || subscription.starts_on <= today)
+    && (!subscription.ends_on || subscription.ends_on >= today);
 
   return {
     enabled: subFlag || entActive,
