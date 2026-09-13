@@ -5,7 +5,7 @@ import { Badge, Button, Card, EmptyState, ErrorNotice, PageHeader, formatStatus 
 import { useSession } from '@/context/session';
 import { fetchDuesForStudent, fetchGradesForStudent, fetchMyAttendance, fetchPaymentsForStudent, fetchStudentById } from '@/lib/api';
 import type { Attendance, Due, ManualGrade, Payment, SessionRecord, Student } from '@/lib/types';
-import { buildReportHtml, printReport } from '@/lib/report';
+import { buildReportHtml, printCenterReport } from '@/lib/report';
 import { arabicMonth, formatDate, formatMoney } from '@/lib/utils';
 
 export default function StudentReportPage() {
@@ -39,13 +39,13 @@ export default function StudentReportPage() {
   const avg = grades.length ? Math.round((grades.reduce((s, g) => s + (Number(g.score) / Math.max(1, Number(g.max_score))) * 100, 0) / grades.length)) : null;
 
   const print = () => {
-    printReport(buildReportHtml(`تقرير الطالب ${student?.name ?? profile?.full_name}`, 'تقرير شامل — خاص بالطالب', [
+    void printCenterReport(profile?.center_id, (branding) => buildReportHtml(`تقرير الطالب ${student?.name ?? profile?.full_name}`, 'تقرير شامل — خاص بالطالب', [
       { title: 'البيانات', headers: ['البند', 'القيمة'], rows: [['الاسم', student?.name ?? profile?.full_name ?? '—'], ['الهاتف', student?.phone ?? '—'], ['ولي الأمر', student?.guardian_phone ?? '—'], ['البريد', profile?.email ?? student?.email ?? '—']] },
       { title: 'الحضور', headers: ['البند', 'القيمة'], rows: [['سجلات الحضور', String(attendance.length)], ['حاضر/متأخر', String(present)], ['غائب', String(absent)]] },
       { title: 'الدرجات', headers: ['التقييم', 'الدرجة', 'النسبة', 'التاريخ'], rows: grades.map((g) => [g.title, `${g.score}/${g.max_score}`, `${Math.round((Number(g.score) / Math.max(1, Number(g.max_score))) * 100)}%`, formatDate(g.created_at)]) },
       { title: 'المستحقات', headers: ['الفترة', 'المبلغ', 'الحالة'], rows: dues.map((d) => [`${arabicMonth(d.month)} ${d.due_year}`, formatMoney(d.amount), d.status === 'paid' ? 'مدفوع' : d.status === 'partial' ? 'جزئي' : 'معلق']) },
       { title: 'الدفعات', headers: ['التاريخ', 'المبلغ', 'ملاحظات'], rows: payments.map((p) => [formatDate(p.payment_date), formatMoney(p.amount), p.notes ?? '—']) },
-    ], { name: profile?.full_name }));
+    ], { name: profile?.full_name, branding }));
   };
 
   return <>

@@ -9,7 +9,7 @@ import { useSession } from '@/context/session';
 import { addStudentToGroup, fetchDuesForStudent, fetchExams, fetchGrades, fetchGradesForStudent, fetchGroups, fetchMyAttendance, fetchMyExamAttempts, fetchMyInquiries, fetchPaymentsForStudent, fetchStudentAccount, fetchStudentById, fetchStudentGroups, removeStudentFromGroup } from '@/lib/api';
 import type { AppExam, AppInquiry, Attendance, Due, ExamAttempt, Grade, Group, ManualGrade, Payment, SessionRecord, Student, StudentAccount } from '@/lib/types';
 import { arabicMonth, formatDate, formatMoney } from '@/lib/utils';
-import { buildReportHtml, printReport } from '@/lib/report';
+import { buildReportHtml, printCenterReport } from '@/lib/report';
 import { isOwner, useTeacherGroupIds } from '@/lib/staff';
 import { disconnectStudentSession, fetchStudentDevices, setStudentDeviceBlocked, type StudentDeviceSession } from '@/lib/student-access';
 
@@ -121,7 +121,7 @@ export default function StudentDetailPage() {
 
   const print = () => {
     if (!student) return;
-    printReport(buildReportHtml(`الملف الشامل للطالب: ${student.name}`, 'Mr Center — تقرير أكاديمي ومالي وسجل نشاط', [
+    void printCenterReport(profile?.center_id, (branding) => buildReportHtml(`الملف الشامل للطالب: ${student.name}`, 'Mr Center — تقرير أكاديمي ومالي وسجل نشاط', [
       { title: 'بيانات الطالب', headers: ['البند', 'القيمة'], rows: [['رقم الملف', student.id], ['الصف', gradeName.get(student.grade_id ?? '') ?? '—'], ['الهاتف', student.phone ?? '—'], ['ولي الأمر', student.guardian_phone ?? '—'], ['البريد', student.email ?? '—'], ['الحالة', student.status], ['الملاحظات', student.notes ?? '—'], ['تاريخ التسجيل', formatDate(student.created_at)]] },
       { title: 'المجموعات والمدرسون', headers: ['المجموعة', 'نوع العضوية', 'المدرس', 'هاتف المدرس'], rows: memberGroups.map((group) => [group.name, group.id === student.group_id ? 'أساسية' : 'إضافية', group.teacher_name || '—', group.teacher_phone || '—']) },
       { title: 'الملخص الأكاديمي', headers: ['البند', 'القيمة'], rows: [['الحضور', `${presentCount + lateCount} من ${attendance.length} (${attendanceRate}%)`], ['متوسط التقييمات اليدوية', manualGrades.length ? `${manualAverage}%` : '—'], ['متوسط الاختبارات الإلكترونية', examAttempts.length ? `${examAverage}%` : '—']] },
@@ -129,7 +129,7 @@ export default function StudentDetailPage() {
       { title: 'الدفعات', headers: ['التاريخ', 'المبلغ', 'ملاحظات'], rows: payments.map((payment) => [formatDate(payment.payment_date), formatMoney(Number(payment.amount)), payment.notes ?? '—']) },
       { title: 'الدرجات والاختبارات', headers: ['التقييم', 'النتيجة', 'التاريخ'], rows: [...manualGrades.map((item) => [item.title, `${item.score}/${item.max_score}`, formatDate(item.created_at)]), ...examAttempts.map((item) => [exams.find((exam) => exam.id === item.exam_id)?.title ?? 'اختبار', `${item.score}/${item.max_score}`, formatDate(item.created_at)])] },
       { title: 'آخر النشاط', headers: ['التاريخ', 'النشاط', 'التفاصيل'], rows: activities.slice(0, 30).map((item) => [formatDate(item.at), item.title, item.detail]) },
-    ], { name: profile?.full_name }));
+    ], { name: profile?.full_name, branding }));
   };
 
   if (student && !teacherCanOpen) return <Card><Notice tone="error">هذا الطالب خارج نطاق المجموعات المسندة لك.</Notice></Card>;

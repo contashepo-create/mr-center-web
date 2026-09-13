@@ -6,7 +6,7 @@ import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
 import { isOwner } from '@/lib/rbac';
-import { buildCustodyReportHtml, printReport } from '@/lib/report';
+import { buildCustodyReportHtml, printCenterReport } from '@/lib/report';
 import { getSupabase } from '@/lib/supabase';
 import type { Profile } from '@/lib/types';
 import { formatDate, formatMoney, todayIso } from '@/lib/utils';
@@ -147,10 +147,10 @@ export function CustodyWorkspace({ embedded = false }: { embedded?: boolean }) {
       await load();
     } catch (err) { setError(err); } finally { setBusy(false); }
   };
-  const printCustody = () => printReport(buildCustodyReportHtml('كشف العهدة والتحصيل', `${currentMonth} — حتى ${todayIso()}`, monthRows.map((row) => {
+  const printCustody = () => void printCenterReport(profile?.center_id, (branding) => buildCustodyReportHtml('كشف العهدة والتحصيل', `${currentMonth} — حتى ${todayIso()}`, monthRows.map((row) => {
     const [label] = custodyLabel(row.status, value(row.delivered_amount));
     return [formatDate(row.custody_date), row.staff_name, formatMoney(value(row.expected_amount)), formatMoney(value(row.delivered_amount)), label, row.notes || '—'];
-  }), { name: profile?.full_name }));
+  }), { name: profile?.full_name, branding }));
 
   return <>
     {!embedded ? <PageHeader title="العهدة داخل المحاسبة" subtitle="تدفق واضح من التحصيل المتوقع إلى التسليم والمطابقة." actions={staffAllowed ? <Button type="button" onClick={openDelivery}>+ تسليم عهدة اليوم</Button> : undefined} /> : null}

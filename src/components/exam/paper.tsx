@@ -10,10 +10,21 @@
 
 import { useEffect, useState } from 'react';
 import type { ExamAnswer, ExamOrnaments, ExamQuestion, PaperTemplate } from '@/lib/types';
+import type { CenterPrintBranding } from '@/lib/printing';
 import { EXAM_TYPE_LABEL } from '@/lib/utils';
 import { arabicNum, CHOICE_KEYS, paperSections } from '@/lib/exam-egyptian';
 import { PaperOrnaments, QuestionImage } from './ornaments';
 import { ExamQuestionInput, UnderlinedQuestionText } from './interactive-input';
+
+/** معاينة الهوية في المحرر فقط؛ نسخة الطباعة تضيف طبقة ثابتة تتكرر بكل صفحة. */
+function PaperPreviewBranding({ branding }: { branding: CenterPrintBranding | null | undefined }) {
+  if (!branding) return null;
+  const watermarkText = branding.watermark_text.trim() || branding.center_name;
+  return <>
+    {branding.watermark_enabled ? <div className={`paper-preview-branding paper-preview-watermark ${branding.watermark_direction}`} style={{ opacity: branding.watermark_opacity }} aria-hidden="true">{branding.watermark_image ? <img src={branding.watermark_image} alt="" /> : null}<span>{watermarkText}</span></div> : null}
+    {branding.logo_url ? <img className={`paper-preview-branding paper-preview-logo ${branding.logo_position}`} style={{ width: branding.logo_size }} src={branding.logo_url} alt={`شعار ${branding.center_name}`} /> : null}
+  </>;
+}
 
 export function ExamPaper({
   title,
@@ -23,6 +34,8 @@ export function ExamPaper({
   questions,
   ornaments,
   centerName,
+  footerText,
+  branding,
   template = 'classic',
 }: {
   title: string;
@@ -32,15 +45,20 @@ export function ExamPaper({
   questions: ExamQuestion[];
   ornaments?: ExamOrnaments | null;
   centerName?: string | null;
+  /** عبارة ختام قابلة للكتابة عند إنشاء الاختبار الورقي. */
+  footerText?: string | null;
+  /** هوية طباعة السنتر؛ لا تظهر في الاختبارات الإلكترونية. */
+  branding?: CenterPrintBranding | null;
   template?: PaperTemplate;
 }) {
   const sections = paperSections(questions);
   return (
     <div className={`exam-paper exam-paper-${template}`} dir="rtl">
       <PaperOrnaments ornaments={ornaments} />
+      <PaperPreviewBranding branding={branding} />
       <div className="exam-paper-inner">
         <div className="exam-paper-head">
-          {centerName ? <div className="exam-paper-center">{centerName}</div> : null}
+          {(branding?.center_name || centerName) ? <div className="exam-paper-center">{branding?.center_name || centerName}</div> : null}
           <h2 className="exam-paper-title">{title || 'اختبار'}</h2>
           <div className="exam-paper-sub">
             {subject ? <span>المادة: {subject}</span> : null}
@@ -72,7 +90,8 @@ export function ExamPaper({
           ))}
         </div>
 
-        <div className="exam-paper-footer">انتهت الأسئلة — بالتوفيق والنجاح 🌟</div>
+        <div className="exam-paper-footer">{footerText?.trim() || 'انتهت الأسئلة — بالتوفيق والنجاح 🌟'}</div>
+        {(branding?.center_name || centerName) ? <div className="exam-paper-bottom-note">{branding?.center_name || centerName}{branding?.footer_address ? ` — ${branding.footer_address}` : ''}</div> : null}
       </div>
     </div>
   );

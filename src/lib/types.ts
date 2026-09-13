@@ -345,6 +345,8 @@ export interface AppExam {
   available_from?: string | null;
   available_until?: string | null;
   paper_template?: PaperTemplate;
+  /** عبارة يكتبها المنشئ في نهاية ورقة الاختبار (اختيارية). */
+  paper_footer?: string;
   /** زخارف الورقة (اختياري — قد تكون غائبة في الاختبارات القديمة) */
   ornaments?: ExamOrnaments | null;
   created_at: string;
@@ -472,11 +474,28 @@ export interface MyNotification {
   is_read: boolean;
 }
 
+export type PrintLogoPosition = 'top_right' | 'top_left' | 'top_center' | 'bottom_right' | 'bottom_left';
+export type PrintWatermarkDirection = 'diagonal' | 'vertical' | 'horizontal';
+
+/** هوية كل مستند مطبوع من السنتر: شعار وتذييل وعلامة مائية. */
+export interface CenterPrintSettings {
+  footer_address: string;
+  logo_url: string;
+  logo_position: PrintLogoPosition;
+  logo_size: number;
+  watermark_enabled: boolean;
+  watermark_text: string;
+  watermark_image: string;
+  watermark_opacity: number;
+  watermark_direction: PrintWatermarkDirection;
+}
+
 export interface CenterSettings {
   whatsapp: string;
   contact_email: string;
   registration_open: boolean;
   archive_year: string;
+  print: CenterPrintSettings;
 }
 
 export interface PublicConfig {

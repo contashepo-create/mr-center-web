@@ -6,6 +6,7 @@
 import { getSupabase } from './supabase';
 import { getDeviceId } from './visitors';
 import { normalizeAnswerText, nowIso, todayIso, uuid } from './utils';
+import { brandForCenter, normalizeCenterPrintSettings, type CenterPrintBranding } from './printing';
 import type {
   Announcement, AppExam, AppInquiry, AppNotification, AppSurvey, AppSurveyResponse, Attendance, AttendanceStatus,
   Center, CenterLookup, CenterSettings, Due, ExamAttempt, Grade,
@@ -1106,6 +1107,7 @@ export async function upsertExam(centerId: string, exam: Partial<AppExam> & {
     available_from: exam.availability_mode === 'scheduled' ? exam.available_from ?? null : null,
     available_until: exam.availability_mode === 'scheduled' ? exam.available_until ?? null : null,
     paper_template: exam.paper_template ?? 'classic',
+    paper_footer: exam.paper_footer?.trim().slice(0, 350) ?? '',
     ornaments: exam.ornaments ?? null,
   };
   if (exam.id) {
@@ -1479,7 +1481,14 @@ export async function fetchCenterSettings(centerId: string): Promise<CenterSetti
     contact_email: s.contact_email ?? '',
     registration_open: s.registration_open ?? true,
     archive_year: s.archive_year ?? '',
+    print: normalizeCenterPrintSettings(s.print),
   };
+}
+
+/** هوية الوثائق في كل شاشة طباعة؛ تُقرأ وقت الطباعة حتى يطبق آخر تعديل فوراً. */
+export async function fetchCenterPrintBranding(centerId: string): Promise<CenterPrintBranding> {
+  const [settings, center] = await Promise.all([fetchCenterSettings(centerId), fetchMyCenter(centerId)]);
+  return brandForCenter(center?.name, settings.print);
 }
 
 export async function saveCenterSettings(centerId: string, s: CenterSettings): Promise<void> {
@@ -1490,6 +1499,7 @@ export async function saveCenterSettings(centerId: string, s: CenterSettings): P
       contact_email: s.contact_email.trim(),
       registration_open: !!s.registration_open,
       archive_year: s.archive_year.trim(),
+      print: normalizeCenterPrintSettings(s.print),
     },
     updated_at: nowIso(),
   });
