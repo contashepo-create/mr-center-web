@@ -22,12 +22,7 @@
 ### ما الذي يضيفه بالضبط
 
 1. **نموذج قاعدة البيانات نفسه**: يستبدل `supabase/20260911_safe_production_migration.sql` بالنسخة المرجعية ويضيف الـ 22 migration المفقودة، من `20260912_entitlement_enforcement.sql` حتى `20260913_student_transfer_requests.sql`. وتشمل الحسابات، التحصيل، العهدة، الرواتب ومسيراتها، الاستبيانات، الاختبارات، الهوية الطباعية، عزل الجهاز، التحويلات وقنوات بث المطور.
-2. **قنوات بث المطور الخمس فقط** في `app/developer/broadcast.tsx`:
-   - سنتر محدد: المالك فقط، أو المالك والطلاب.
-   - كل أصحاب السناتر.
-   - كل أصحاب السناتر وكل الطلاب.
-   - كل الطلاب فقط.
-   - موظفو كل السناتر أو موظفو سنتر محدد.
+2. **قنوات بث المطور الأساسية** في `app/developer/broadcast.tsx`؛ ويوسعها الباتش `0002` إلى مصفوفة المستلمين وطريقة الظهور الجديدة.
 3. **لا يوجد اختيار جمهور في الهاتف يُعتد به وحده**: الإرسال صار عبر `developer_broadcast_notification`، وRPC يتحقق من دور المطور والنطاق وقواعد المركز على الخادم.
 4. **صندوق إشعارات المطور** في `app/(admin)/dev-notices.tsx` صار متاحاً للمالك والموظف النشط، ويقرأ/يؤشر القراءة فقط عبر `get_my_developer_notifications` و`mark_developer_notification_read`. أزيل الاستعلام المباشر الواسع على `app_notifications`.
 5. **عقود TypeScript** اللازمة (`staff` و`DeveloperBroadcastChannel` و`CenterBroadcastDelivery` و`DeveloperBroadcastResult`) وواجهات API الموازية للويب.
@@ -40,15 +35,31 @@ git clone https://github.com/contashepo-create/Mr-center-android-.git
 cd Mr-center-android-
 git checkout b944636
 
-# انسخ ملف الباتش من هذه الحزمة إلى جذر مستودع Android، ثم:
+# انسخ ملفَي الباتش من هذه الحزمة إلى جذر مستودع Android، ثم:
 git apply --check 0001-shared-schema-and-developer-broadcast.patch
-git apply --index 0001-shared-schema-and-developer-broadcast.patch
+git apply 0001-shared-schema-and-developer-broadcast.patch
+git apply --check 0002-communication-hub-and-presence.patch
+git apply 0002-communication-hub-and-presence.patch
 npm ci --ignore-scripts
 npm run typecheck
 npm test
 ```
 
 إذا كان Android قد تقدّم عن `b944636` فلا تستخدم `--3way` بلا مراجعة. طبّق أولاً `git apply --check`، ثم انقل فقط الـ hunks المتعارضة يدوياً مع إبقاء أسماء RPC والـ migration كما هي. بعدها راجع `git diff --check`.
+
+### الباتش الإضافي: مركز التواصل والحضور
+
+الملف: [`0002-communication-hub-and-presence.patch`](./0002-communication-hub-and-presence.patch)
+SHA-256: `90c7b7f539f86ea8408d8b75779905cc9e84106390bdb2657a28e67c1442e8a8`
+
+**يشترط تطبيق `0001` قبله.** ينقل التغيير نفسه إلى Android Native:
+
+- جمهور شامل مرن لبث المطور، بما فيه «كل أعضاء السناتر» و«كل حسابات المشروع»، وخيارات سنتر محدد للمالك/الموظفين/الطلاب بأي مزيج مطلوب.
+- وضع الظهور: إشعار عادي، رسالة، أو تنبيه طارئ بنافذة منبثقة؛ البث الشامل يصل للموظفين أيضاً مرة واحدة فقط لكل حساب.
+- `CommunicationHeader` أعلى كل منطقة الإدارة/الطالب/المطور: جرس ورسائل بعدادات، تبديل الوضع، وتسجيل الخروج؛ لا تبقى رسائل المطور أو الدعم في قائمة «المزيد».
+- كل قراءة أو فتح محادثة يبث حدثاً محلياً لتختفي الشارة فوراً، مع refresh احتياطي كل 45 ثانية.
+- سجل حضور حساب Android عبر UUID تثبيت محلي في `SecureStore`، **لا IP ولا بصمة عتاد**، وشاشة مطور لآخر ظهور صاحبي السناتر.
+- اختبار RPC Android أصبح يقرأ المخطط وكل migrations، ويقبل overload الصحيح للدالة بدلاً من فحص schema الأساسي وحده.
 
 ### نشر قاعدة البيانات المشتركة — خطوة إلزامية قبل تجربة العميل
 
@@ -63,7 +74,7 @@ EXPO_PUBLIC_SUPABASE_ANON_KEY=<same-anon-key>
 
 لا يوضع `service_role` في تطبيق Android أو في `app.json`. المصادقة وRLS وRPC هي حد الأمان، وليست إخفاء أزرار الواجهة.
 
-> تحذير تشغيل: اختبار قنوات `all_owners` و`all_owners_students` و`all_students` وموظفي كل السناتر على الإنتاج يرسل رسائل حقيقية. اختبر قناة السنتر المحدد فقط في مشروع Staging أو بسنتر اختبار.
+> تحذير تشغيل: اختبار قنوات الجمهور العالمي — مثل `all_owners` و`all_owners_students` (تضم الموظفين) و`all_students` و`all_project` — يرسل رسائل حقيقية. اختبر قناة السنتر المحدد فقط في مشروع Staging أو بسنتر اختبار.
 
 ---
 
@@ -142,7 +153,7 @@ git diff --check
 - تحصيل جماعي: تحديد/إلغاء/مراجعة لا تغيّر القاعدة، والحفظ يغيرها مرة واحدة.
 - تغيير صف طالب له مجموعة، ثم محاولة اختيار مجموعة من الصف القديم.
 - طباعة اختبار طويل وتقرير جدول طويل: الشعار لا يغطي الكلام، والأسئلة موجودة، ولا قص أو scale مشوّه، واسم PDF وصفي (الاختبار: صف + مادة + مدرس إن توفرت).
-- بث القناة الخاصة لمركز اختبار: `owners` ثم `owners_students`؛ وبث موظفي مركز اختبار؛ تحقق من صندوق الموظف والمالك فقط.
+- بث القناة الخاصة لمركز اختبار: `owners` ثم `owners_students` (المالك والموظفون والطلاب)؛ وتحقق من صندوق كل دور مرة واحدة فقط.
 
 ---
 

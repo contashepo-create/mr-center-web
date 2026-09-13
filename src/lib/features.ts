@@ -4,6 +4,7 @@
 // ============================================================
 
 import { getSupabase } from './supabase';
+import { getDeviceId } from './visitors';
 import { sendSupportMessage } from './api';
 
 export interface MyFeatures {
@@ -87,6 +88,32 @@ export async function devListVisitors(): Promise<VisitorRow[]> {
 export async function devSetDeviceBlocked(deviceId: string, blocked: boolean): Promise<void> {
   const { error } = await getSupabase().rpc('dev_set_device_blocked', { p_device_id: deviceId, p_blocked: blocked });
   if (error) throw error;
+}
+
+/** آخر نشاط للحساب الحالي. الجهاز معرف محلي عشوائي، وليس عنوان IP أو بصمة عتاد. */
+export async function touchMyAccountPresence(): Promise<void> {
+  const { error } = await getSupabase().rpc('touch_my_account_presence', {
+    p_device_id: getDeviceId(), p_platform: 'web',
+  });
+  if (error) throw error;
+}
+
+export interface CenterOwnerPresence {
+  account_id: string;
+  center_id: string;
+  center_name: string;
+  center_code: string;
+  owner_name: string;
+  owner_email: string | null;
+  last_seen: string | null;
+  platform: string | null;
+}
+
+/** آخر ظهور لصاحب كل سنتر — المطور فقط، من سجل حضور الحساب لا من IP. */
+export async function devListCenterOwnerPresence(): Promise<CenterOwnerPresence[]> {
+  const { data, error } = await getSupabase().rpc('dev_list_center_owner_presence');
+  if (error) throw error;
+  return (Array.isArray(data) ? data : []) as CenterOwnerPresence[];
 }
 
 /** المطور يفعّل/يوقف المحاسبة لسنتر محدد */

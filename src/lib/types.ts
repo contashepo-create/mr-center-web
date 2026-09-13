@@ -456,12 +456,26 @@ export interface AppSurveyResponse {
 
 export type NotificationAudience = 'all' | 'grade' | 'group' | 'student' | 'owners' | 'staff';
 
-/** قنوات البث الخمس الحصرية في لوحة المطور. */
-export type DeveloperBroadcastChannel = 'center' | 'all_owners' | 'all_owners_students' | 'all_students' | 'staff';
-export type CenterBroadcastDelivery = 'owners' | 'owners_students';
+/** طريقة وصول بث المطور: إشعار في الجرس، رسالة في صندوق الرسائل، أو نافذة طارئة مع سجل. */
+export type DeveloperBroadcastPresentation = 'notification' | 'message' | 'urgent';
+
+/** قنوات المطور الشاملة. all_owners_students تشمل الآن الموظفين أيضاً حتى لا يفقد فريق السنتر التنبيه. */
+export type DeveloperBroadcastChannel =
+  | 'center'
+  | 'all_owners'
+  | 'all_owners_staff'
+  | 'all_owners_students'
+  | 'all_students'
+  | 'staff'
+  | 'all_project';
+
+/** مستلمو السنتر المحدد؛ كل اختيار يولّد صفاً واحداً فقط لكل دور، بلا رسائل مكررة. */
+export type CenterBroadcastDelivery = 'owners' | 'owners_staff' | 'owners_students' | 'owners_students_staff' | 'students' | 'staff' | 'everyone';
 
 export interface DeveloperBroadcastResult {
   channel: DeveloperBroadcastChannel;
+  presentation?: DeveloperBroadcastPresentation;
+  broadcast_id?: string;
   centers: number;
   notification_rows: number;
   recipient_accounts: number;
@@ -482,7 +496,29 @@ export interface MyNotification {
   title: string;
   body: string;
   created_at: string;
+  /** notification = الجرس، message = صندوق الرسائل، urgent = نافذة طارئة وسجل. */
+  presentation?: DeveloperBroadcastPresentation;
   is_read: boolean;
+}
+
+export interface CommunicationItem {
+  id: string;
+  title: string;
+  body: string;
+  created_at: string;
+  presentation?: DeveloperBroadcastPresentation;
+  route: string;
+  kind: 'notification' | 'developer_message' | 'support_message';
+}
+
+export interface CommunicationBucket {
+  unread: number;
+  items: CommunicationItem[];
+}
+
+export interface CommunicationSummary {
+  notifications: CommunicationBucket;
+  messages: CommunicationBucket;
 }
 
 export type PrintLogoPosition = 'top_right' | 'top_left' | 'top_center' | 'bottom_right' | 'bottom_left';

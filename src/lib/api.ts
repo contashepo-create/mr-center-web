@@ -12,7 +12,8 @@ import type {
   Center, CenterLookup, CenterSettings, Due, ExamAttempt, Grade,
   ExamAnswer, ExamQuestion, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
   PublishedExam, SessionRecord, Student, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
-  SurveyAnswer, SurveyQuestion, StudentAccount, DeveloperBroadcastChannel, CenterBroadcastDelivery, DeveloperBroadcastResult,
+  SurveyAnswer, SurveyQuestion, StudentAccount, DeveloperBroadcastChannel, CenterBroadcastDelivery, DeveloperBroadcastPresentation, DeveloperBroadcastResult,
+  CommunicationSummary,
 } from './types';
 
 // ------------------------------------------------------------
@@ -1340,6 +1341,7 @@ export async function developerBroadcastNotification(input: {
   body: string;
   centerId?: string | null;
   centerDelivery?: CenterBroadcastDelivery | null;
+  presentation?: DeveloperBroadcastPresentation;
 }): Promise<DeveloperBroadcastResult> {
   const { data, error } = await getSupabase().rpc('developer_broadcast_notification', {
     p_channel: input.channel,
@@ -1347,9 +1349,15 @@ export async function developerBroadcastNotification(input: {
     p_body: input.body.trim(),
     p_center: input.centerId || null,
     p_center_delivery: input.centerDelivery || null,
+    p_presentation: input.presentation ?? 'notification',
   });
   if (error) throw error;
   return data as DeveloperBroadcastResult;
+}
+
+/** يحدث عدادات الشريط العلوي فور القراءة/الرد، من دون انتظار إعادة تحميل الصفحة. */
+export function notifyCommunicationChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('mrcenter:communication-changed'));
 }
 
 /** رسائل المطور الخاصة بصاحب السنتر أو موظفه، مفلترة حسب الحساب خادمياً. */
@@ -1359,10 +1367,34 @@ export async function fetchMyDeveloperNotifications(): Promise<MyNotification[]>
   return (data ?? []) as MyNotification[];
 }
 
+/** ملخص عدادات ورسائل الشريط العلوي. لا يعيد إلا عناصر الحساب الحالي ومساراتها المناسبة. */
+export async function fetchMyCommunicationSummary(): Promise<CommunicationSummary> {
+  const { data, error } = await getSupabase().rpc('get_my_communication_summary');
+  if (error) throw error;
+  const raw = (data ?? {}) as Partial<CommunicationSummary>;
+  return {
+    notifications: { unread: Number(raw.notifications?.unread ?? 0), items: Array.isArray(raw.notifications?.items) ? raw.notifications.items : [] },
+    messages: { unread: Number(raw.messages?.unread ?? 0), items: Array.isArray(raw.messages?.items) ? raw.messages.items : [] },
+  };
+}
+
+/** تعليم أي إشعار ظاهر للحساب الحالي؛ يتحقق RPC من الدور والسنتر والجمهور. */
+export async function markMyCommunicationNotificationRead(notificationId: string): Promise<void> {
+  const { error } = await getSupabase().rpc('mark_my_communication_notification_read', { p_notification: notificationId });
+  if (error) throw error;
+  notifyCommunicationChanged();
+}
+
 /** تعليم رسالة المطور المتاحة لهذا الحساب فقط كمقروءة. */
 export async function markDeveloperNotificationRead(notificationId: string): Promise<void> {
-  const { error } = await getSupabase().rpc('mark_developer_notification_read', { p_notification: notificationId });
+  await markMyCommunicationNotificationRead(notificationId);
+}
+
+/** تعليم رسائل الدعم الواردة للحساب الحالي كمقروءة عند فتح المحادثة. */
+export async function markMySupportMessagesRead(centerId?: string | null): Promise<void> {
+  const { error } = await getSupabase().rpc('mark_my_support_messages_read', { p_center: centerId ?? null });
   if (error) throw error;
+  notifyCommunicationChanged();
 }
 
 export async function fetchNotifications(centerId: string): Promise<AppNotification[]> {
@@ -1414,29 +1446,6 @@ export async function fetchMyNotifications(): Promise<MyNotification[]> {
   const { data, error } = await getSupabase().rpc('get_my_notifications');
   if (error) throw error;
   return (data ?? []) as MyNotification[];
-}
-
-/** إشعارات المطور الخاصة بأصحاب السنتر (قناة owners) */
-export async function fetchOwnerNotices(centerId: string): Promise<AppNotification[]> {
-  const { data, error } = await getSupabase().from('app_notifications').select('*')
-    .eq('center_id', centerId).eq('audience', 'owners')
-    .order('created_at', { ascending: false }).limit(100);
-  if (error) throw error;
-  return (data ?? []) as AppNotification[];
-}
-
-/** تعليم إشعار مطور كمقروء (يُخزن بمعرف حساب المسئول) */
-export async function markOwnerNoticeRead(centerId: string, notificationId: string): Promise<void> {
-  const { data: sess } = await getSupabase().auth.getSession();
-  const uid = sess.session?.user.id;
-  if (!uid) throw new Error('not_authenticated');
-  const { data: mine } = await getSupabase().from('app_notification_reads').select('id')
-    .eq('notification_id', notificationId).eq('student_id', uid).maybeSingle();
-  if (mine) return;
-  const { error } = await getSupabase().from('app_notification_reads').insert({
-    id: uuid(), center_id: centerId, notification_id: notificationId, student_id: uid,
-  });
-  if (error) throw error;
 }
 
 // ------------------------------------------------------------
@@ -1497,6 +1506,7 @@ export async function markNotificationRead(centerId: string, notificationId: str
     id: uuid(), center_id: centerId, notification_id: notificationId, student_id: studentId,
   });
   if (error && !String((error as { message?: string }).message ?? '').includes('duplicate key')) throw error;
+  notifyCommunicationChanged();
 }
 
 // ------------------------------------------------------------

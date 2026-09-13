@@ -5,7 +5,7 @@ import { Badge, Button, Card, EmptyState, ErrorNotice, Notice, PageHeader, Texta
 import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
-import { fetchSupportMessages, sendSupportMessage } from '@/lib/api';
+import { fetchSupportMessages, markMySupportMessagesRead, sendSupportMessage } from '@/lib/api';
 import { isOwner } from '@/lib/rbac';
 import type { SupportMessage } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
@@ -21,7 +21,7 @@ export default function AdminSupportPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
-  const load = async () => { if (!centerId) return; try { setRows(await fetchSupportMessages(centerId)); } catch (err) { setError(err); } };
+  const load = async () => { if (!centerId) return; try { setRows(await fetchSupportMessages(centerId)); await markMySupportMessagesRead(centerId); } catch (err) { setError(err); } };
   useEffect(() => { void load(); }, [centerId]);
 
   const openNew = () => { setBody(''); setDirty(false); setError(null); setOpen(true); };

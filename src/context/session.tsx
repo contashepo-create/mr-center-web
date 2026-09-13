@@ -3,7 +3,7 @@
 import type { Session } from '@supabase/supabase-js';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { getSupabase, initSupabase, isSupabaseReady } from '@/lib/supabase';
-import { fetchMyFeatures, type MyFeatures } from '@/lib/features';
+import { fetchMyFeatures, touchMyAccountPresence, type MyFeatures } from '@/lib/features';
 import { claimMySession, isMySessionCurrent, registerMyStudentDevice } from '@/lib/sessionGuard';
 import { clearLocalAccessSession, refreshAccessToken } from '@/lib/auth/clientSession';
 import { ACCESS_REFRESH_MARGIN_MS } from '@/lib/auth/constants';
@@ -52,6 +52,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       // الجلسة المستعادة لا تمر دائماً بحدث SIGNED_IN؛ سجّل جهاز الطالب
       // دون إعادة مطالبة الجلسة حتى لا تستحوذ جلسة قديمة على جلسة أحدث.
       if (prof?.role === 'student') void registerMyStudentDevice();
+      // حضور الحساب (ومن ضمنه صاحب السنتر) لا يسجل IP ولا يعرقل تحميل الجلسة.
+      if (prof) void touchMyAccountPresence().catch(() => {});
 
       if (prof) {
         const [sub, feat] = await Promise.all([
@@ -215,6 +217,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         if (!cancelled) await refresh();
       }
       if (cancelled) return;
+      // الدالة خادمية throttled لدقيقة؛ نطلبها مع فحص الجلسة كي يبقى آخر ظهور دقيقاً.
+      void touchMyAccountPresence().catch(() => {});
       const current = await isMySessionCurrent();
       if (cancelled || current) return;
       // فقد هذا الجهاز جلسته: تسجيل خروج فوري

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Badge, Button, Card, EmptyState, ErrorNotice, LinkButton, PageHeader } from '@/components/ui';
 import { devFetchCenters, devFetchPendingRequests, devFetchProfilesCount, type CenterWithSub } from '@/lib/api';
-import { devFetchVisitorStats, devListVisitors, devSetDeviceBlocked, type VisitorRow, type VisitorStats } from '@/lib/features';
+import { devFetchVisitorStats, devListCenterOwnerPresence, devListVisitors, devSetDeviceBlocked, type CenterOwnerPresence, type VisitorRow, type VisitorStats } from '@/lib/features';
 import type { SubscriptionRequest } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 
@@ -13,19 +13,21 @@ export default function DeveloperDashboardPage() {
   const [profiles, setProfiles] = useState<{ total: number; byRole: Record<string, number> } | null>(null);
   const [visitors, setVisitors] = useState<VisitorStats | null>(null);
   const [devices, setDevices] = useState<VisitorRow[] | null>(null);
+  const [ownerPresence, setOwnerPresence] = useState<CenterOwnerPresence[] | null>(null);
   const [blockBusy, setBlockBusy] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
 
   const load = async () => {
     try {
-      const [c, r, p, v, d] = await Promise.all([
+      const [c, r, p, v, d, presence] = await Promise.all([
         devFetchCenters(),
         devFetchPendingRequests(),
         devFetchProfilesCount(),
         devFetchVisitorStats().catch(() => null),
         devListVisitors().catch(() => null),
+        devListCenterOwnerPresence().catch(() => null),
       ]);
-      setCenters(c); setRequests(r); setProfiles(p); setVisitors(v); setDevices(d);
+      setCenters(c); setRequests(r); setProfiles(p); setVisitors(v); setDevices(d); setOwnerPresence(presence);
     } catch (err) { setError(err); }
   };
   useEffect(() => { void load(); }, []);
@@ -74,6 +76,11 @@ export default function DeveloperDashboardPage() {
         </div>
       </Card>
     </div>
+
+    <Card className="stack" style={{ marginBottom: 18 }}>
+      <div className="row-between"><div><h2 className="h3">آخر زيارة لأصحاب السناتر</h2><p className="muted small" style={{ margin: '5px 0 0' }}>حضور الحساب المسجل فقط؛ لا يعتمد على عنوان IP ولا يكشف الأجهزة للسناتر.</p></div><Badge tone="info">{ownerPresence?.length ?? 0}</Badge></div>
+      {!ownerPresence ? <EmptyState title="لا توجد بيانات حضور بعد" body="تظهر الزيارة بعد تطبيق ترحيل مركز التواصل وفتح صاحب السنتر للتطبيق." /> : ownerPresence.length === 0 ? <EmptyState title="لا يوجد أصحاب سناتر بعد" /> : <div className="table-wrap"><table><thead><tr><th>السنتر</th><th>صاحب السنتر</th><th>آخر زيارة</th><th>المنصة</th></tr></thead><tbody>{ownerPresence.map((owner) => <tr key={owner.account_id}><td>{owner.center_name}<span className="tiny muted"> · {owner.center_code}</span></td><td>{owner.owner_name}</td><td>{owner.last_seen ? formatDate(owner.last_seen) : 'لم يفتح النسخة المحدثة بعد'}</td><td>{owner.platform || '—'}</td></tr>)}</tbody></table></div>}
+    </Card>
 
     <Card className="stack" style={{ marginBottom: 18 }}>
       <div className="row-between">

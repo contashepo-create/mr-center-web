@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Badge, Button, Card, EmptyState, ErrorNotice, PageHeader, Select, Textarea } from '@/components/ui';
 import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
-import { devFetchCenters, devFetchSupportMessages, devSendSupportMessage, type CenterWithSub } from '@/lib/api';
+import { devFetchCenters, devFetchSupportMessages, devSendSupportMessage, markMySupportMessagesRead, type CenterWithSub } from '@/lib/api';
 import type { SupportMessage } from '@/lib/types';
 import { formatDate } from '@/lib/utils';
 
@@ -21,6 +21,7 @@ export default function DeveloperSupportPage() {
   const visible = centerId ? rows.filter((r) => r.center_id === centerId) : rows;
   const load = async () => { try { const [c, m] = await Promise.all([devFetchCenters(), devFetchSupportMessages()]); setCenters(c); setRows(m); if (!centerId && c[0]) setCenterId(c[0].id); } catch (err) { setError(err); } };
   useEffect(() => { void load(); }, []);
+  useEffect(() => { if (centerId) void markMySupportMessagesRead(centerId).catch(() => {}); }, [centerId]);
 
   const openReply = () => { setBody(''); setDirty(false); setError(null); setOpen(true); };
 
