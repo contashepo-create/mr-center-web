@@ -9,6 +9,7 @@
 // ============================================================
 
 import { useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
 import type { ExamAnswer, ExamOrnaments, ExamQuestion, PaperTemplate } from '@/lib/types';
 import type { CenterPrintBranding } from '@/lib/printing';
 import { EXAM_TYPE_LABEL } from '@/lib/utils';
@@ -38,6 +39,7 @@ export function ExamPaper({
   footerText,
   branding,
   template = 'classic',
+  printLayout = 'comfortable',
 }: {
   title: string;
   subject: string;
@@ -51,12 +53,20 @@ export function ExamPaper({
   /** هوية طباعة السنتر؛ لا تظهر في الاختبارات الإلكترونية. */
   branding?: CenterPrintBranding | null;
   template?: PaperTemplate;
+  /** تخطيط اقتصادي يستهدف صفحتين بتقليل الفراغات فقط، من دون تصغير أو قص النص. */
+  printLayout?: 'comfortable' | 'two_pages';
 }) {
   const sections = paperSections(questions);
   const paperCenterName = branding ? (branding.header_show_center_name ? branding.center_name : '') : (centerName ?? '');
   const paperFooter = branding ? documentFooterText(branding) : (centerName ?? '');
+  const hasLogo = Boolean(branding?.logo_url);
+  const logoSpace = Math.max(76, Math.min(156, (branding?.logo_size ?? 42) + 24));
   return (
-    <div className={`exam-paper exam-paper-${template}`} dir="rtl">
+    <div
+      className={`exam-paper exam-paper-${template} ${printLayout === 'two_pages' ? 'exam-paper-fit-two-pages' : ''} ${hasLogo ? `exam-paper-has-logo ${branding?.logo_position}` : ''}`}
+      style={{ '--paper-logo-space': `${logoSpace}px` } as CSSProperties}
+      dir="rtl"
+    >
       <PaperOrnaments ornaments={ornaments} />
       <PaperPreviewBranding branding={branding} />
       <div className="exam-paper-inner">

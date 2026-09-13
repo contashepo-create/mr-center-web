@@ -182,6 +182,29 @@ const PAPER_TEMPLATES: { id: PaperTemplate; title: string; description: string; 
   { id: 'modern', title: 'النقاء الأنيق', description: 'أبيض بسيط وحدود هندسية رفيعة.', symbol: '◫' },
   { id: 'formal', title: 'الرسمي', description: 'القالب السابق المتوافق للاختبارات الرسمية.', symbol: '▥' },
 ];
+type PaperPreviewLayout = 'comfortable' | 'two_pages';
+
+/** أدوات مباشرة داخل المعاينة: ما يراه المستخدم هنا هو ما سيطبع، من دون أي تحجيم مشوّه. */
+function PaperPreviewControls({
+  subject, template, ornaments, layout, onTemplate, onOrnaments, onLayout,
+}: {
+  subject: string;
+  template: PaperTemplate;
+  ornaments: ExamOrnaments;
+  layout: PaperPreviewLayout;
+  onTemplate: (template: PaperTemplate) => void;
+  onOrnaments: (ornaments: ExamOrnaments) => void;
+  onLayout: (layout: PaperPreviewLayout) => void;
+}) {
+  return <section className="paper-preview-controls stack" aria-label="تحكم مباشر في شكل الورقة">
+    <div className="row-between"><div><h3 className="h3">تحكم سريع في الورقة</h3><p className="muted small">طبّق التغيير مباشرة على المعاينة قبل الطباعة.</p></div><Badge tone={layout === 'two_pages' ? 'info' : 'default'}>{layout === 'two_pages' ? 'وضع صفحتين' : 'تخطيط مريح'}</Badge></div>
+    <div className="paper-preview-layouts" role="group" aria-label="تخطيط الطباعة"><button type="button" className={layout === 'comfortable' ? 'active' : ''} onClick={() => onLayout('comfortable')}><strong>مريح وطبيعي</strong><small>يتدفق حسب حجم الورقة.</small></button><button type="button" className={layout === 'two_pages' ? 'active' : ''} onClick={() => onLayout('two_pages')}><strong>استهداف صفحتين</strong><small>يقلل الفراغات فقط ويحافظ على القراءة.</small></button></div>
+    <div className="template-picker paper-preview-template-picker">{PAPER_TEMPLATES.map((item) => <button type="button" key={item.id} className={template === item.id ? 'active' : ''} onClick={() => onTemplate(item.id)}><span>{item.symbol}</span><strong>{item.title}</strong><small>{item.description}</small></button>)}</div>
+    <details className="exam-appearance-panel" open><summary>🎨 الزخارف والأختام</summary><div className="stack" style={{ marginTop: 12 }}><div className="row-between"><p className="muted small">يمكنك تغيير التوزيع أو اختيار العناصر، ثم وضع الأختام فوق الورقة حين تختار الوضع اليدوي.</p><Button type="button" variant="secondary" onClick={() => onOrnaments({ ...ornaments, kinds: ornamentsForSubject(subject).map((item) => item.kind) })}>حسب المادة ({subjectLabelFor(subject)})</Button></div><div className="grid grid-3"><Select label="أسلوب التوزيع" value={ornaments.placement} onChange={(event) => onOrnaments({ ...ornaments, placement: event.target.value as 'auto' | 'manual' })}><option value="auto">تلقائي على الحواف</option><option value="manual">يدوي (أختام)</option></Select><Select label="الكثافة" value={ornaments.density} onChange={(event) => onOrnaments({ ...ornaments, density: event.target.value as ExamOrnaments['density'] })}><option value="low">خفيفة</option><option value="medium">متوسطة</option><option value="high">كثيفة</option></Select><div className="input-wrap"><span className="label">الشفافية: {Math.round((ornaments.opacity ?? 0.18) * 100)}%</span><input className="input" type="range" min={4} max={50} value={Math.round((ornaments.opacity ?? 0.18) * 100)} onChange={(event) => onOrnaments({ ...ornaments, opacity: Number(event.target.value) / 100 })} /></div></div><div className="stamp-palette">{ALL_ORNAMENTS.map((item) => { const active = ornaments.kinds.includes(item.kind); return <button key={item.kind} type="button" title={item.label} className={`stamp-chip ${active ? 'active' : ''}`} onClick={() => onOrnaments({ ...ornaments, kinds: active ? ornaments.kinds.filter((kind) => kind !== item.kind) : [...ornaments.kinds, item.kind] })}>{item.glyph}</button>; })}</div>{ornaments.placement === 'manual' ? <Notice tone="info">اختر ختماً من اللوحة التي تحيط بالورقة، ثم اضغط موضعه داخل المعاينة. حدده لتعديل حجمه أو حذفه مباشرة.</Notice> : null}</div></details>
+    {layout === 'two_pages' ? <Notice tone="info">وضع الصفحتين لا يستخدم تصغيراً أو قصاً. إذا كان نص الاختبار أطول فعلياً من صفحتين، ستضاف صفحات للحفاظ على جميع الأسئلة واضحة.</Notice> : null}
+  </section>;
+}
+
 const ONLINE_MODES: { id: OnlineExamMode; title: string; lead: string; description: string }[] = [
   { id: 'objective', title: 'موضوعي', lead: 'تصحيح تلقائي', description: 'اختيار من متعدد، متعدد الإجابات، صح وخطأ، أكمل ووصل.' },
   { id: 'essay', title: 'مقالي', lead: 'مراجعة المعلم', description: 'أسئلة مقالية وإجابات قصيرة وتصويب مع درجات يدوية.' },
@@ -210,6 +233,11 @@ export default function AdminExamsPage() {
   /** الاختبار المحفوظ الذي تفتحه المعاينة من المكتبة؛ null يعني معاينة المسودة في المحرر. */
   const [previewSource, setPreviewSource] = useState<AppExam | null>(null);
   const [previewMode, setPreviewMode] = useState<'paper' | 'electronic'>('paper');
+  /** تعديلات شكل الورقة للاختبار المحفوظ تبقى محلية حتى يختار المستخدم حفظها. */
+  const [previewPaperTemplate, setPreviewPaperTemplate] = useState<PaperTemplate>('classic');
+  const [previewPaperOrnaments, setPreviewPaperOrnaments] = useState<ExamOrnaments>(defaultOrnaments(''));
+  const [previewPaperLayout, setPreviewPaperLayout] = useState<PaperPreviewLayout>('comfortable');
+  const [savingPreviewPaper, setSavingPreviewPaper] = useState(false);
   const [tryoutOpen, setTryoutOpen] = useState(false);
   const [titleError, setTitleError] = useState(false);
   const [resultsExam, setResultsExam] = useState<AppExam | null>(null);
@@ -368,8 +396,41 @@ export default function AdminExamsPage() {
 
   const openPreview = (exam: AppExam) => {
     setPreviewSource(exam);
+    setPreviewPaperTemplate(exam.paper_template ?? 'classic');
+    setPreviewPaperOrnaments(exam.ornaments ?? defaultOrnaments(exam.subject));
+    setPreviewPaperLayout('comfortable');
     setPreviewMode((exam.delivery_mode ?? 'online') === 'paper' ? 'paper' : 'electronic');
     setPreview(true);
+  };
+  const openDraftPreview = () => {
+    setPreviewSource(null);
+    setPreviewPaperTemplate(form.paper_template);
+    setPreviewPaperOrnaments(ornaments);
+    setPreviewPaperLayout('comfortable');
+    setPreviewMode(form.delivery_mode === 'paper' ? 'paper' : 'electronic');
+    setPreview(true);
+  };
+  const updatePreviewPaperTemplate = (template: PaperTemplate) => {
+    setPreviewPaperTemplate(template);
+    if (!previewSource) setForm((current) => ({ ...current, paper_template: template }));
+  };
+  const updatePreviewPaperOrnaments = (next: ExamOrnaments) => {
+    setPreviewPaperOrnaments(next);
+    if (!previewSource) setOrnaments(next);
+  };
+  const savePreviewPaperAppearance = async () => {
+    if (!centerId || !previewSource) return;
+    setSavingPreviewPaper(true); setError(null);
+    try {
+      const saved = { ...previewSource, paper_template: previewPaperTemplate, ornaments: previewPaperOrnaments };
+      await upsertExam(centerId, saved);
+      setPreviewSource(saved);
+      await load();
+      toast.success('تم حفظ قالب وزخارف ورقة الاختبار');
+    } catch (err) {
+      setError(err);
+      toast.error('تعذر حفظ شكل الورقة', err instanceof Error ? err.message : 'حاول مرة أخرى.');
+    } finally { setSavingPreviewPaper(false); }
   };
   const openResults = async (exam: AppExam) => {
     setSelected(exam);
@@ -425,6 +486,12 @@ export default function AdminExamsPage() {
       <Button type="button" variant="ghost" onClick={() => void remove(exam.id)}>حذف</Button>
     </div>;
   };
+  const previewPaperTemplateValue = previewSource ? previewPaperTemplate : form.paper_template;
+  const previewPaperOrnamentsValue = previewSource ? previewPaperOrnaments : ornaments;
+  const previewPaperQuestions = previewSource?.questions ?? questions;
+  const previewPaperSubject = previewSource?.subject ?? form.subject;
+  const previewIsSavedPaper = Boolean(previewSource && (previewSource.delivery_mode ?? 'online') === 'paper');
+
   if (tryoutOpen) return <CreatorExamTryout title={form.title} subject={form.subject} duration={Number(form.duration) || 30} questions={questions} onClose={() => setTryoutOpen(false)} />;
 
   const library = <>
@@ -441,7 +508,7 @@ export default function AdminExamsPage() {
   <Card className="stack"><div className="exam-type-palette">{EGYPT_TYPES.map((type) => <button key={type.type} type="button" className="exam-type-btn" onClick={() => addQuestion(type.type)}><span className="exam-type-icon">{type.icon}</span><span>إضافة سؤال رئيسي: {type.label}</span></button>)}</div></Card>
   <div className="questions-workspace">{questionSections.map((section, mainIndex) => { const meta = egyptMeta(section.type); return <section key={section.id} className="exam-main-question"><div className="exam-main-question-head"><div><span className="exam-main-question-index">السؤال {mainIndex + 1}</span><h3>{meta.header}</h3><p>{meta.manual ? 'تصحيح يدوي بعد التسليم' : 'تصحيح تلقائي عند التسليم'}</p></div><Badge tone="info">{section.indices.length} سؤال فرعي</Badge></div><div className="exam-subquestions">{section.indices.map((questionIndex, subIndex) => <QuestionEditor key={`${section.id}-${questionIndex}`} q={questions[questionIndex]} answer={answers[questionIndex]} mainNumber={mainIndex + 1} subNumber={subIndex + 1} onQuestion={(next) => updateQuestion(questionIndex, next)} onAnswer={(next) => updateAnswer(questionIndex, next)} onDelete={() => removeQuestion(questionIndex)} onMove={(delta) => move(questionIndex, delta)} />)}</div><Button type="button" variant="secondary" className="block" onClick={() => addSubQuestion(section.id, section.type)}>＋ إضافة سؤال فرعي جديد ({section.indices.length + 1})</Button></section>; })}</div>
   <p className="exam-builder-total">إجمالي الاختبار: <strong>{questions.length}</strong> سؤال فرعي · <strong>{total}</strong> درجة</p>
-</section>{selected ? <section className="exam-workspace-section"><div className="exam-editor-section-title"><span>4</span><div><h2 className="h3">المحاولات والتصحيح</h2><p>راجع إجابات الطلاب سؤالاً بسؤال وحرر النتيجة بعد اعتمادها.</p></div><Badge tone="info">{attempts.length} محاولة</Badge></div><Card className="stack">{attempts.length === 0 ? <EmptyState title="لا توجد محاولات بعد" /> : <div className="table-wrap"><table><thead><tr><th>الطالب</th><th>الدرجة</th><th>الحالة</th><th>التاريخ</th><th>إجراء</th></tr></thead><tbody>{attempts.map((attempt) => <tr key={attempt.id}><td><strong>{studentName.get(attempt.student_id) ?? attempt.student_id}</strong></td><td>{attempt.score} / {attempt.max_score}</td><td><Badge tone={attempt.status === 'graded' ? 'success' : 'warn'}>{attempt.status === 'graded' ? 'مصححة' : 'بانتظار المراجعة'}</Badge></td><td>{formatDate(attempt.created_at)}</td><td><div className="row"><Button type="button" variant="secondary" onClick={() => openReview(attempt)}>مراجعة</Button><input className="input" style={{ width: 86 }} value={manualScores[attempt.id] ?? ''} onChange={(event) => setManualScores({ ...manualScores, [attempt.id]: event.target.value })} placeholder="درجة" inputMode="decimal" /><Button type="button" variant="ghost" onClick={() => void grade(attempt.id)}>حفظ سريع</Button></div></td></tr>)}</tbody></table></div>}</Card></section> : null}</div></div></main><footer className="exam-editor-footer"><div>{validation ? <span className="editor-validation">⚠ {validation}</span> : <span className="editor-validation good">✓ الاختبار يحتوي على {questions.length} سؤال و{total} درجة</span>}</div><div className="row"><Button type="button" variant="secondary" onClick={() => setTryoutOpen(true)}>اختبر كطالب</Button><Button type="button" variant="secondary" onClick={() => { setPreviewSource(null); setPreview(true); }}>معاينة قبل الحفظ</Button><Button type="button" disabled={busy} onClick={() => void submit()}>{busy ? 'جاري الحفظ...' : form.delivery_mode === 'paper' ? '💾 حفظ ورقة الاختبار' : form.is_published ? '💾 حفظ ونشر الاختبار' : '💾 حفظ المسودة'}</Button></div></footer></section>;
+</section>{selected ? <section className="exam-workspace-section"><div className="exam-editor-section-title"><span>4</span><div><h2 className="h3">المحاولات والتصحيح</h2><p>راجع إجابات الطلاب سؤالاً بسؤال وحرر النتيجة بعد اعتمادها.</p></div><Badge tone="info">{attempts.length} محاولة</Badge></div><Card className="stack">{attempts.length === 0 ? <EmptyState title="لا توجد محاولات بعد" /> : <div className="table-wrap"><table><thead><tr><th>الطالب</th><th>الدرجة</th><th>الحالة</th><th>التاريخ</th><th>إجراء</th></tr></thead><tbody>{attempts.map((attempt) => <tr key={attempt.id}><td><strong>{studentName.get(attempt.student_id) ?? attempt.student_id}</strong></td><td>{attempt.score} / {attempt.max_score}</td><td><Badge tone={attempt.status === 'graded' ? 'success' : 'warn'}>{attempt.status === 'graded' ? 'مصححة' : 'بانتظار المراجعة'}</Badge></td><td>{formatDate(attempt.created_at)}</td><td><div className="row"><Button type="button" variant="secondary" onClick={() => openReview(attempt)}>مراجعة</Button><input className="input" style={{ width: 86 }} value={manualScores[attempt.id] ?? ''} onChange={(event) => setManualScores({ ...manualScores, [attempt.id]: event.target.value })} placeholder="درجة" inputMode="decimal" /><Button type="button" variant="ghost" onClick={() => void grade(attempt.id)}>حفظ سريع</Button></div></td></tr>)}</tbody></table></div>}</Card></section> : null}</div></div></main><footer className="exam-editor-footer"><div>{validation ? <span className="editor-validation">⚠ {validation}</span> : <span className="editor-validation good">✓ الاختبار يحتوي على {questions.length} سؤال و{total} درجة</span>}</div><div className="row"><Button type="button" variant="secondary" onClick={() => setTryoutOpen(true)}>اختبر كطالب</Button><Button type="button" variant="secondary" onClick={openDraftPreview}>معاينة قبل الحفظ</Button><Button type="button" disabled={busy} onClick={() => void submit()}>{busy ? 'جاري الحفظ...' : form.delivery_mode === 'paper' ? '💾 حفظ ورقة الاختبار' : form.is_published ? '💾 حفظ ونشر الاختبار' : '💾 حفظ المسودة'}</Button></div></footer></section>;
 
   return <>
     {workspace === 'library' ? library : builder}
@@ -453,10 +520,10 @@ export default function AdminExamsPage() {
       subtitle={`${previewSource?.questions.length ?? questions.length} سؤال · ${previewSource?.total_score ?? total} درجة · ${previewSource?.duration_minutes ?? form.duration} دقيقة`}
       onClose={() => { setPreview(false); setPreviewSource(null); }}
       wide
-      footer={<div className="row"><Button type="button" variant="secondary" onClick={() => void printCenterExamPaper(centerId)}>طباعة احترافية / PDF</Button><Button type="button" onClick={() => { setPreview(false); setPreviewSource(null); }}>إغلاق</Button></div>}
+      footer={<div className="row">{previewIsSavedPaper && previewMode === 'paper' ? <Button type="button" variant="secondary" disabled={savingPreviewPaper} onClick={() => void savePreviewPaperAppearance()}>{savingPreviewPaper ? 'جارٍ حفظ شكل الورقة...' : 'حفظ القالب والزخارف'}</Button> : null}<Button type="button" variant="secondary" onClick={() => void printCenterExamPaper(centerId)}>طباعة احترافية / PDF</Button><Button type="button" onClick={() => { setPreview(false); setPreviewSource(null); }}>إغلاق</Button></div>}
     >
       <div className="tabs" style={{ marginBottom: 16 }}><button type="button" className={`tab ${previewMode === 'paper' ? 'active' : ''}`} onClick={() => setPreviewMode('paper')}>🖨 ورقي (للطباعة)</button><button type="button" className={`tab ${previewMode === 'electronic' ? 'active' : ''}`} onClick={() => setPreviewMode('electronic')}>◉ إلكتروني</button></div>
-      {previewMode === 'paper' ? previewSource ? <ExamPaper title={previewSource.title} subject={previewSource.subject} duration={String(previewSource.duration_minutes)} total={previewSource.total_score} questions={previewSource.questions} ornaments={previewSource.ornaments} template={previewSource.paper_template ?? 'classic'} footerText={previewSource.paper_footer} branding={printBranding} /> : ornaments.placement === 'manual' ? <StampEditor ornaments={ornaments} onChange={setOrnaments}><ExamPaper title={form.title} subject={form.subject} duration={form.duration} total={total} questions={questions} ornaments={null} template={form.paper_template} footerText={form.paper_footer} branding={printBranding} /></StampEditor> : <ExamPaper title={form.title} subject={form.subject} duration={form.duration} total={total} questions={questions} ornaments={ornaments} template={form.paper_template} footerText={form.paper_footer} branding={printBranding} /> : <ElectronicExamView questions={previewSource?.questions ?? questions} />}
+      {previewMode === 'paper' ? <div className="paper-preview-workspace"><PaperPreviewControls subject={previewPaperSubject} template={previewPaperTemplateValue} ornaments={previewPaperOrnamentsValue} layout={previewPaperLayout} onTemplate={updatePreviewPaperTemplate} onOrnaments={updatePreviewPaperOrnaments} onLayout={setPreviewPaperLayout} /><div className="paper-preview-canvas">{previewPaperOrnamentsValue.placement === 'manual' ? <StampEditor ornaments={previewPaperOrnamentsValue} onChange={updatePreviewPaperOrnaments}><ExamPaper title={previewSource?.title ?? form.title} subject={previewPaperSubject} duration={String(previewSource?.duration_minutes ?? form.duration)} total={previewSource?.total_score ?? total} questions={previewPaperQuestions} ornaments={null} template={previewPaperTemplateValue} printLayout={previewPaperLayout} footerText={previewSource?.paper_footer ?? form.paper_footer} branding={printBranding} /></StampEditor> : <ExamPaper title={previewSource?.title ?? form.title} subject={previewPaperSubject} duration={String(previewSource?.duration_minutes ?? form.duration)} total={previewSource?.total_score ?? total} questions={previewPaperQuestions} ornaments={previewPaperOrnamentsValue} template={previewPaperTemplateValue} printLayout={previewPaperLayout} footerText={previewSource?.paper_footer ?? form.paper_footer} branding={printBranding} />}</div></div> : <ElectronicExamView questions={previewSource?.questions ?? questions} />}
     </Modal>
 
     <Modal

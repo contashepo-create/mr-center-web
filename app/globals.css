@@ -548,6 +548,36 @@ tbody tr:hover { background: var(--surface-2); }
 .exam-paper-match-blank { width: 60px; border-bottom: 1.5px dotted #999; }
 
 .exam-paper-footer { text-align: center; color: #666; font-size: .9rem; margin-top: 18px; font-weight: 700; }
+/* مساحة آمنة للشعار في رأس ورقة الاختبار، بحسب الحجم المعرّف في هوية الطباعة. */
+.exam-paper-has-logo.top_right .exam-paper-head { padding-right: var(--paper-logo-space); }
+.exam-paper-has-logo.top_left .exam-paper-head { padding-left: var(--paper-logo-space); }
+.exam-paper-has-logo.top_center .exam-paper-head { padding-top: calc(var(--paper-logo-space) * .62); }
+.exam-paper-has-logo.bottom_right .exam-paper-inner,.exam-paper-has-logo.bottom_left .exam-paper-inner { padding-bottom: var(--paper-logo-space); }
+/* نمط صفحتين: كثافة أذكى عن طريق الفراغات والخطوط الطبيعية، وليس التحجيم أو القص. */
+.exam-paper-fit-two-pages .exam-paper-inner { padding: 20px 22px; }
+.exam-paper-fit-two-pages.exam-paper-has-logo.bottom_right .exam-paper-inner,.exam-paper-fit-two-pages.exam-paper-has-logo.bottom_left .exam-paper-inner { padding-bottom: var(--paper-logo-space); }
+.exam-paper-fit-two-pages .exam-paper-head { padding-bottom: 9px; margin-bottom: 8px; }
+.exam-paper-fit-two-pages .exam-paper-title { font-size: 1.28rem; }
+.exam-paper-fit-two-pages .exam-paper-sub { margin-top: 3px; font-size: .85rem; }
+.exam-paper-fit-two-pages .exam-paper-meta { gap: 10px; margin-bottom: 10px; font-size: .82rem; }
+.exam-paper-fit-two-pages .exam-paper-body { gap: 8px; }
+.exam-paper-fit-two-pages .exam-paper-sec-head { padding: 5px 10px; }
+.exam-paper-fit-two-pages .exam-paper-sec-title { font-size: .9rem; line-height: 1.45; }
+.exam-paper-fit-two-pages .exam-paper-sec-mark { min-width: 28px; height: 20px; margin-inline-end: 5px; padding: 0 5px; font-size: .68rem; }
+.exam-paper-fit-two-pages .exam-paper-sec-marks { padding: 2px 7px; font-size: .7rem; }
+.exam-paper-fit-two-pages .exam-paper-sec-items { padding: 7px 10px 8px; gap: 5px; }
+.exam-paper-fit-two-pages .exam-paper-item { padding-bottom: 5px; }
+.exam-paper-fit-two-pages .exam-paper-q-row { gap: 9px; }
+.exam-paper-fit-two-pages .exam-paper-q-body { line-height: 1.58; }
+.exam-paper-fit-two-pages .exam-paper-choices { gap: 2px 14px; margin-top: 2px; }
+.exam-paper-fit-two-pages .exam-paper-choice { font-size: .83rem; }
+.exam-paper-fit-two-pages .exam-paper-tf { gap: 7px; margin-top: 3px; }
+.exam-paper-fit-two-pages .exam-paper-tf-box { min-width: 2.9rem; height: 1.45rem; }
+.exam-paper-fit-two-pages .exam-paper-lines { margin-top: 2px; }
+.exam-paper-fit-two-pages .exam-paper-dots { margin-top: 4px; height: 21px; }
+.exam-paper-fit-two-pages .exam-paper-match { gap: 4px; margin-top: 3px; }
+.exam-paper-fit-two-pages .exam-paper-match-row { gap: 8px; }
+.exam-paper-fit-two-pages .exam-paper-footer { margin-top: 10px; font-size: .8rem; }
 .q-image img { max-width: 100%; }
 
 /* ===== باني الاختبار: عمودان (باني + معاينة حية) ===== */
@@ -600,6 +630,13 @@ tbody tr:hover { background: var(--surface-2); }
   .exam-paper-inner { padding: 0; }
   .exam-paper-section { break-inside: avoid; }
   .exam-paper-item { break-inside: avoid; }
+  /* يظل النص بحجم مقروء؛ الضغط يقتصر على الفراغات حتى لا يتشوه عند استهداف صفحتين. */
+  .exam-paper-fit-two-pages { font-size: .93rem; }
+  .exam-paper-fit-two-pages .exam-paper-inner,.exam-paper-fit-two-pages.exam-paper-has-logo.bottom_right .exam-paper-inner,.exam-paper-fit-two-pages.exam-paper-has-logo.bottom_left .exam-paper-inner { padding: 0; }
+  /* يسمح بانسياب القسم الطويل بين الصفحتين مع إبقاء السؤال الفرعي سليماً. */
+  .exam-paper-fit-two-pages .exam-paper-section { break-inside: auto; }
+  .exam-paper-fit-two-pages .exam-paper-sec-head { break-after: avoid; }
+  .exam-paper-fit-two-pages .exam-paper-q-body { line-height: 1.55; }
 }
 
 /* ===== لوحة الشرف الاحتفالية ===== */
@@ -661,6 +698,10 @@ tbody tr:hover { background: var(--surface-2); }
 .exam-create-choice strong { font-size:1.08rem; }.exam-create-choice > span:not(.exam-create-icon) { color:var(--muted); font-size:.86rem; line-height:1.75; }.exam-create-choice em { justify-self:start; margin-top:4px; padding:4px 9px; border-radius:999px; color:var(--muted); background:var(--surface); font-size:.72rem; font-style:normal; font-weight:800; }
 .exam-create-icon { width:48px; height:48px; display:grid; place-items:center; border-radius:14px; background:var(--surface); border:1px solid var(--border); font-size:1.45rem; }.exam-create-choice.online .exam-create-icon { background:var(--primary-soft); border-color:color-mix(in srgb,var(--primary) 35%,var(--border)); }
 .exam-editor-section-title { display:flex; align-items:center; gap:10px; padding:2px 4px; }.exam-editor-section-title>span { width:27px; height:27px; display:grid; place-items:center; flex:0 0 auto; border-radius:50%; background:var(--primary); color:var(--on-primary); font-weight:900; font-size:.78rem; }.exam-editor-section-title>div { flex:1; }.exam-editor-section-title h2,.exam-editor-section-title p { margin:0; }.exam-editor-section-title p { margin-top:3px; color:var(--muted); font-size:.77rem; }.exam-mode-pill { display:inline-flex; margin-top:7px; padding:3px 8px; border-radius:999px; font-size:.7rem; font-weight:800; background:var(--surface-3); color:var(--muted); }.exam-mode-pill.online { color:var(--primary); background:var(--primary-soft); }.exam-appearance-panel { border:1px dashed var(--border-strong); border-radius:12px; padding:0 13px 13px; background:color-mix(in srgb,var(--surface-3) 70%,transparent); }.exam-appearance-panel summary { padding:13px 0 2px; cursor:pointer; color:var(--muted); font-size:.84rem; font-weight:800; }
+/* المعاينة الورقية تجمع لوحة الشكل مع الورقة الحية حتى يطبع المستخدم ما راجعه بالضبط. */
+.paper-preview-workspace { display:grid; grid-template-columns:minmax(250px, .8fr) minmax(0, 1.35fr); gap:16px; align-items:start; direction:rtl; }
+.paper-preview-controls { position:sticky; top:10px; max-height:calc(100vh - 170px); overflow:auto; padding:13px; border:1px solid var(--border); border-radius:14px; background:var(--surface-2); }
+.paper-preview-controls .h3 { margin:0; }.paper-preview-layouts { display:grid; grid-template-columns:1fr 1fr; gap:8px; }.paper-preview-layouts button { display:grid; gap:4px; min-height:70px; padding:10px; text-align:right; color:var(--text); background:var(--surface-3); border:1px solid var(--border); border-radius:10px; }.paper-preview-layouts button.active,.paper-preview-layouts button:hover { border-color:var(--primary); background:var(--primary-soft); }.paper-preview-layouts small { color:var(--muted); font-size:.72rem; line-height:1.45; }.paper-preview-template-picker { grid-template-columns:repeat(2,1fr); }.paper-preview-template-picker button { min-height:82px; padding:9px; }.paper-preview-canvas { min-width:0; max-height:calc(100vh - 160px); overflow:auto; padding:8px; border:1px solid var(--border); border-radius:14px; background:var(--surface-3); }
 @media (max-width:600px) { .exam-create-choices{grid-template-columns:1fr}.exam-create-choice{min-height:0}.exam-editor-section-title{align-items:flex-start}.exam-editor-section-title .badge{margin-inline-start:auto} }
 .collection-qr-video { width:100%; min-height:260px; border-radius:14px; background:#000; object-fit:cover; }
 
@@ -740,7 +781,7 @@ tbody tr:hover { background: var(--surface-2); }
 .exam-paper-modern { border-radius: 2px; border-color: #9ab4d0; background: linear-gradient(180deg, #f7fbff, #fff 180px); }.exam-paper-modern .exam-paper-head { border-bottom-color: #81a8cf; }.exam-paper-formal { border-width: 2px; border-radius: 0; border-color: #1e3a5f; }.exam-paper-formal .exam-paper-head { border-block: 3px double #1e3a5f; }
 
 @media (max-width: 1100px) { .exam-type-guide-grid { grid-template-columns: repeat(4, 1fr); }.exam-builder-layout { grid-template-columns: 1fr; }.exam-preview-col { position: static; }.exam-live-preview { max-height: none; }.exam-preview-scroll { max-height: 500px; }.exam-library-list .exam-library-card { grid-template-columns: 42px 1fr auto; }.exam-library-list .exam-card-facts { grid-column: 2; }.exam-library-list .exam-card-footer { grid-column: 3; }.exam-library-list .exam-library-card > p { display: none; } }
-@media (max-width: 700px) { .workspace-kpis { grid-template-columns: repeat(2, 1fr); }.workspace-filter-grid,.workspace-filter-grid.two { grid-template-columns: 1fr; }.students-workspace { border-radius: 12px; }.grade-workspace-head { align-items: flex-start; flex-wrap: wrap; }.grade-workspace-head > .row { width: 100%; }.grade-group-row { align-items: flex-start; flex-wrap: wrap; }.grade-group-side { width: 100%; display: flex; align-items: center; justify-content: space-between; }.exam-editor-topbar,.exam-editor-footer { align-items: flex-start; flex-direction: column; }.exam-editor-footer { min-height: 110px; }.exam-editor-main { padding-bottom: 135px; }.exam-type-guide-grid { grid-template-columns: repeat(2, 1fr); }.online-mode-row,.template-picker { grid-template-columns: 1fr; }.exam-library-list .exam-library-card { grid-template-columns: 38px minmax(0,1fr); gap: 10px; }.exam-library-list .exam-card-facts { grid-column: 1 / -1; }.exam-library-list .exam-card-footer { grid-column: 1 / -1; grid-row: auto; }.exam-library-list .exam-card-extra { display: flex; grid-column: 1 / -1; }.exam-card-footer { align-items: flex-start; flex-direction: column; } }
+@media (max-width: 700px) { .workspace-kpis { grid-template-columns: repeat(2, 1fr); }.workspace-filter-grid,.workspace-filter-grid.two { grid-template-columns: 1fr; }.students-workspace { border-radius: 12px; }.grade-workspace-head { align-items: flex-start; flex-wrap: wrap; }.grade-workspace-head > .row { width: 100%; }.grade-group-row { align-items: flex-start; flex-wrap: wrap; }.grade-group-side { width: 100%; display: flex; align-items: center; justify-content: space-between; }.exam-editor-topbar,.exam-editor-footer { align-items: flex-start; flex-direction: column; }.exam-editor-footer { min-height: 110px; }.exam-editor-main { padding-bottom: 135px; }.exam-type-guide-grid { grid-template-columns: repeat(2, 1fr); }.online-mode-row,.template-picker,.paper-preview-workspace { grid-template-columns: 1fr; }.paper-preview-controls { position:static; max-height:none; }.paper-preview-canvas { max-height:none; }.exam-library-list .exam-library-card { grid-template-columns: 38px minmax(0,1fr); gap: 10px; }.exam-library-list .exam-card-facts { grid-column: 1 / -1; }.exam-library-list .exam-card-footer { grid-column: 1 / -1; grid-row: auto; }.exam-library-list .exam-card-extra { display: flex; grid-column: 1 / -1; }.exam-card-footer { align-items: flex-start; flex-direction: column; } }
 @media (max-width: 430px) { .workspace-kpis { grid-template-columns: 1fr; }.workspace-stat { min-height: 80px; }.exam-type-guide-grid { grid-template-columns: 1fr 1fr; }.exam-editor-topbar .row { flex-wrap: wrap; }.exam-editor-footer .row { width: 100%; }.exam-editor-footer .btn { flex: 1; padding-inline: 8px; } }
 
 /* قائمة الاختبارات: صف مستقل بالكامل لكل اختبار، ولا نعيد استعمال شبكة الكروت هنا.
