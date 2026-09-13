@@ -390,6 +390,15 @@ export function arabicError(err: unknown): string {
   if (msg.includes('student_not_in_center')) return 'الطالب المحدد لا يخص هذا السنتر';
   if (msg.includes('center_inactive')) return 'السنتر موقوف أو الاشتراك منتهي — لا يمكن تنفيذ هذه العملية حالياً';
   if (msg.includes('due_not_found')) return 'المستحق المحدد غير موجود أو لا تملك صلاحية تحصيله';
+  if (msg.includes('accounting_not_enabled')) return 'خدمة المحاسبة غير مفعلة لسنترك حالياً';
+  if (msg.includes('invalid_employee')) return 'الموظف المختار غير نشط أو لا يخص هذا السنتر';
+  if (msg.includes('invalid_advance_amount')) return 'أدخل مبلغ سلفة صحيحاً أكبر من صفر';
+  if (msg.includes('invalid_salary_amount')) return 'أدخل راتباً أساسياً صحيحاً أكبر من صفر';
+  if (msg.includes('invalid_commission_amount')) return 'أدخل مبلغ عمولة صحيحاً أكبر من صفر';
+  if (msg.includes('invalid_ledger_entry') || msg.includes('invalid_ledger_kind')) return 'تحقق من نوع الحركة وتصنيفها ومبلغها';
+  if (msg.includes('advance_exceeds_balance')) return 'قيمة السلفة المسوّاة أكبر من رصيد سلف الموظف القائم';
+  if (msg.includes('payroll_deductions_exceed_total')) return 'السلفة المسوّاة والخصومات أكبر من إجمالي استحقاق الراتب';
+  if (msg.includes('not_allowed')) return 'ليس لديك صلاحية لتنفيذ هذا الإجراء';
   if (msg.includes('invalid_group')) return 'المجموعة المختارة لا تخص هذا السنتر — أعد اختيارها';
   if (msg.includes('invalid_grade')) return 'الصف المختار لا يخص هذا السنتر — أعد اختياره';
   if (msg.includes('sharing_unavailable')) return 'المشاركة غير متاحة على هذا الجهاز';

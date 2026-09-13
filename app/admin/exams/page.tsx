@@ -86,6 +86,7 @@ function QuestionEditor({ q, answer, index, onQuestion, onAnswer, onDelete, onMo
   onDelete: () => void;
   onMove: (delta: number) => void;
 }) {
+  const [expanded, setExpanded] = useState(index === 0);
   const meta = egyptMeta(q.type);
   const setType = (type: ExamQuestionType) => {
     const nq = newQuestion(type);
@@ -107,12 +108,15 @@ function QuestionEditor({ q, answer, index, onQuestion, onAnswer, onDelete, onMo
         <Badge tone="info">{meta.label}</Badge>
       </h3>
       <div className="row">
+        <Button type="button" variant="ghost" onClick={() => setExpanded((value) => !value)}>{expanded ? 'طي' : 'فتح'}</Button>
         <Button type="button" variant="secondary" onClick={() => onMove(-1)} title="تحريك لأعلى">↑</Button>
         <Button type="button" variant="secondary" onClick={() => onMove(1)} title="تحريك لأسفل">↓</Button>
         <Button type="button" variant="danger" onClick={onDelete}>حذف</Button>
       </div>
     </div>
 
+    {!expanded ? <div className="exam-question-summary"><span>{q.q || 'اكتب نص السؤال…'}</span><span>{q.marks} درجة · {meta.manual ? 'تصحيح يدوي' : 'تصحيح تلقائي'}</span></div> : null}
+    {expanded ? <div className="exam-question-body stack">
     <div className="grid grid-3">
       <Select label="نوع السؤال" value={q.type} onChange={(e) => setType(e.target.value as ExamQuestionType)}>
         {EGYPT_TYPES.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
@@ -191,6 +195,7 @@ function QuestionEditor({ q, answer, index, onQuestion, onAnswer, onDelete, onMo
       </div>
       {q.image ? <div className="row" style={{ alignItems: 'center', marginTop: 8 }}><img src={q.image} alt="معاينة" style={{ maxHeight: 90, maxWidth: 220, borderRadius: 8, border: '1px solid var(--border)' }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} /><span className="tiny muted">تظهر الصورة بجانب السؤال في الورق، وفوقه/تحته إلكترونياً حسب اختيارك.</span></div> : null}
     </details>
+    </div> : null}
   </div>;
 }
 
@@ -212,6 +217,10 @@ export default function AdminExamsPage() {
   const [error, setError] = useState<unknown>(null);
   const [preview, setPreview] = useState(false);
   const [previewMode, setPreviewMode] = useState<'paper' | 'electronic'>('paper');
+  const [workspace, setWorkspace] = useState<'library' | 'builder'>('library');
+  const [librarySearch, setLibrarySearch] = useState('');
+  const [libraryGrade, setLibraryGrade] = useState('all');
+  const [libraryStatus, setLibraryStatus] = useState<'all' | 'published' | 'draft'>('all');
   const [reviewAttempt, setReviewAttempt] = useState<ExamAttempt | null>(null);
   const [reviewScores, setReviewScores] = useState<Record<number, string>>({});
   const [reviewTotal, setReviewTotal] = useState('');
@@ -220,6 +229,15 @@ export default function AdminExamsPage() {
   const studentName = useMemo(() => new Map(students.map((s) => [s.id, s.name])), [students]);
   const validation = useMemo(() => validateExamDraft(questions.map((q, i) => ({ ...q, answer: typeof answers[i] === 'string' ? answers[i] as string : q.answer, corrects: Array.isArray(answers[i]) ? answers[i] as number[] : undefined }))), [questions, answers]);
   const total = examMarksTotal(questions);
+  const filteredExams = useMemo(() => {
+    const query = librarySearch.trim().toLocaleLowerCase('ar-EG');
+    return exams.filter((exam) => {
+      if (libraryGrade !== 'all' && exam.grade_id !== libraryGrade) return false;
+      if (libraryStatus === 'published' && !exam.is_published) return false;
+      if (libraryStatus === 'draft' && exam.is_published) return false;
+      return !query || `${exam.title} ${exam.subject} ${grades.find((grade) => grade.id === exam.grade_id)?.name ?? ''}`.toLocaleLowerCase('ar-EG').includes(query);
+    });
+  }, [exams, librarySearch, libraryGrade, libraryStatus, grades]);
 
   const load = async () => {
     if (!centerId) return;
@@ -241,8 +259,9 @@ export default function AdminExamsPage() {
   const addQuestion = (type: ExamQuestionType) => { const q = newQuestion(type); setQuestions((old) => [...old, q]); setAnswers((old) => [...old, defaultAnswer(q)]); };
   const removeQuestion = (idx: number) => { if (questions.length === 1) return; setQuestions((old) => old.filter((_, i) => i !== idx)); setAnswers((old) => old.filter((_, i) => i !== idx)); };
 
-  const reset = () => { setSelected(null); setAttempts([]); setManualScores({}); setForm({ id: '', title: '', subject: '', grade_id: '', duration: '30', attempts: '1', show_result: 'end', is_published: false }); setQuestions([newQuestion('mcq')]); setAnswers([0]); setOrnaments(defaultOrnaments('')); };
+  const reset = () => { setWorkspace('builder'); setSelected(null); setAttempts([]); setManualScores({}); setForm({ id: '', title: '', subject: '', grade_id: '', duration: '30', attempts: '1', show_result: 'end', is_published: false }); setQuestions([newQuestion('mcq')]); setAnswers([0]); setOrnaments(defaultOrnaments('')); };
   const edit = async (exam: AppExam) => {
+    setWorkspace('builder');
     setSelected(exam);
     setForm({ id: exam.id, title: exam.title, subject: exam.subject, grade_id: exam.grade_id ?? '', duration: String(exam.duration_minutes), attempts: String(exam.attempts_allowed ?? 1), show_result: (exam.show_result ?? 'end') as ExamResultMode, is_published: exam.is_published });
     const qs = normalizeQuestions(exam.questions);
@@ -303,9 +322,20 @@ export default function AdminExamsPage() {
   };
 
   return <>
-    <PageHeader title="الاختبارات الإلكترونية" subtitle="باني أسئلة بصيغة الورقة الامتحانية المصرية مع معاينة حية فورية ونشر وتصحيح ومحاولات." actions={<Button type="button" variant="secondary" onClick={reset}>+ اختبار جديد</Button>} />
+    <PageHeader title="الاختبارات" subtitle={workspace === 'builder' ? 'محرر احترافي منظم: إعداد، أسئلة، معاينة ورقية أو إلكترونية.' : 'مكتبة الاختبارات: أنشئ، انشر، راجع المحاولات وراقب حالة كل اختبار.'} actions={<div className="row">{workspace === 'builder' ? <Button type="button" variant="secondary" onClick={() => setWorkspace('library')}>← مكتبة الاختبارات</Button> : null}<Button type="button" onClick={reset}>+ إنشاء اختبار</Button></div>} />
     <ErrorNotice error={error} />
 
+    {workspace === 'library' ? <>
+      <div className="grid grid-4 exams-kpis" style={{ margin: '16px 0' }}>
+        <Card className="compact kpi"><span className="muted">كل الاختبارات</span><div className="kpi-value">{exams.length}</div></Card>
+        <Card className="compact kpi"><span className="muted">منشور للطلاب</span><div className="kpi-value" style={{ color: 'var(--success)' }}>{exams.filter((exam) => exam.is_published).length}</div></Card>
+        <Card className="compact kpi"><span className="muted">مسودات</span><div className="kpi-value">{exams.filter((exam) => !exam.is_published).length}</div></Card>
+        <Card className="compact kpi"><span className="muted">إجمالي الأسئلة</span><div className="kpi-value">{exams.reduce((sum, exam) => sum + exam.questions.length, 0)}</div></Card>
+      </div>
+      <Card className="exams-library-toolbar stack"><div className="grid grid-3"><Input label="بحث" value={librarySearch} onChange={(event) => setLibrarySearch(event.target.value)} placeholder="عنوان أو مادة أو صف" /><Select label="الصف" value={libraryGrade} onChange={(event) => setLibraryGrade(event.target.value)}><option value="all">كل الصفوف</option>{grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}</Select><Select label="الحالة" value={libraryStatus} onChange={(event) => setLibraryStatus(event.target.value as 'all' | 'published' | 'draft')}><option value="all">الكل</option><option value="published">منشور</option><option value="draft">مسودة</option></Select></div><div className="row-between"><span className="tiny muted">{filteredExams.length} اختبار مطابق</span><Button type="button" variant="ghost" onClick={() => { setLibrarySearch(''); setLibraryGrade('all'); setLibraryStatus('all'); }}>مسح الفلاتر</Button></div></Card>
+      {filteredExams.length === 0 ? <Card><EmptyState title={exams.length ? 'لا توجد اختبارات مطابقة للفلاتر' : 'أنشئ أول اختبار لسنترك'} body={exams.length ? 'جرّب تغيير البحث أو الصف أو حالة النشر.' : 'اختر «إنشاء اختبار» ثم أضف أسئلة ومعاينة وانشره وقتما تكون جاهزاً.'} /></Card> : <section className="exam-library-grid">{filteredExams.map((exam) => { const gradeName = grades.find((grade) => grade.id === exam.grade_id)?.name ?? 'كل الصفوف'; const examAttempts = selected?.id === exam.id ? attempts.length : null; return <Card className="exam-library-card" key={exam.id}><div className="exam-library-card-top"><span className="exam-card-icon">📝</span><Badge tone={exam.is_published ? 'success' : 'default'}>{exam.is_published ? 'منشور' : 'مسودة'}</Badge></div><div><h2 className="h3">{exam.title}</h2><p className="muted small">{exam.subject || 'بدون مادة'} · {gradeName}</p></div><div className="exam-card-facts"><span>❔ {exam.questions.length} سؤال</span><span>★ {exam.total_score} درجة</span><span>◷ {exam.duration_minutes} دقيقة</span></div><div className="exam-card-footer"><span className="tiny muted">{examAttempts === null ? `أنشئ في ${formatDate(exam.created_at)}` : `${examAttempts} محاولة محمّلة`}</span><div className="row"><Button type="button" variant="ghost" onClick={() => void edit(exam)}>تحرير</Button><Button type="button" variant="secondary" onClick={async () => { try { await toggleExamPublished(exam.id, !exam.is_published); toast.success(exam.is_published ? 'تم إلغاء نشر الاختبار' : 'تم نشر الاختبار للطلاب'); await load(); } catch (err) { setError(err); } }}>{exam.is_published ? 'إيقاف' : 'نشر'}</Button></div></div><div className="exam-card-extra"><Button type="button" variant="ghost" onClick={() => void edit(exam)}>عرض المحاولات والتصحيح ←</Button><Button type="button" variant="ghost" onClick={() => void remove(exam.id)}>حذف</Button></div></Card>; })}</section>}
+    </> : <>
+      <div className="exam-builder-steps"><span className="active">1. بيانات الاختبار</span><span>2. بناء الأسئلة</span><span>3. معاينة ونشر</span></div>
     <div className="exam-builder-layout">
       <div className="stack">
         <Card className="stack">
@@ -422,37 +452,10 @@ export default function AdminExamsPage() {
       </div>
     </div>
 
-    <Card className="stack" style={{ marginTop: 18 }}>
-      <div className="row-between"><h2 className="h3">الاختبارات المحفوظة</h2><Badge tone="info">{exams.length}</Badge></div>
-      {exams.length === 0 ? <EmptyState title="لا توجد اختبارات" /> : (
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>الاختبار</th><th>المادة</th><th>الأسئلة</th><th>الدرجة</th><th>الحالة</th><th>التاريخ</th><th>إجراءات</th></tr></thead>
-            <tbody>
-              {exams.map((exam) => (
-                <tr key={exam.id}>
-                  <td><strong>{exam.title}</strong></td>
-                  <td>{exam.subject || '—'}</td>
-                  <td>{exam.questions.length}</td>
-                  <td>{exam.total_score}</td>
-                  <td><Badge tone={exam.is_published ? 'success' : 'default'}>{exam.is_published ? 'منشور' : 'مسودة'}</Badge></td>
-                  <td>{formatDate(exam.created_at)}</td>
-                  <td>
-                    <div className="row" style={{ gap: 6 }}>
-                      <Button type="button" variant="secondary" onClick={() => void edit(exam)}>تعديل / محاولات</Button>
-                      <Button type="button" variant="secondary" onClick={async () => { await toggleExamPublished(exam.id, !exam.is_published); await load(); }}>{exam.is_published ? 'إلغاء النشر' : 'نشر'}</Button>
-                      <Button type="button" variant="danger" onClick={() => void remove(exam.id)}>حذف</Button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Card>
+    </>}
 
-    {selected ? (
+
+    {workspace === 'builder' && selected ? (
       <Card className="stack" style={{ marginTop: 18 }}>
         <div className="row-between"><h2 className="h3">محاولات: {selected.title}</h2><Badge tone="info">{attempts.length} محاولة</Badge></div>
         {attempts.length === 0 ? <EmptyState title="لا توجد محاولات بعد" /> : (

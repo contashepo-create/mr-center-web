@@ -182,6 +182,7 @@ supabase/20260912_security.sql                   # تحصيل ذري من الس
 supabase/20260912_fix_year_columns.sql           # أعمدة السنوات الصحيحة + ربط الحضور بالحصص + دالة التحصيل
 supabase/20260912_entitlement_enforcement.sql    # فرض حدود الاشتراكات خادمياً + تنبيهات التجاوز + عزل المدرسين
 supabase/20260912_fiscal_accounting_gate.sql     # قفل المحاسبة غير المفعّلة على مستوى RLS/RPC
+supabase/20260913_practical_accounting.sql        # تسوية رواتب/سلف صحيحة + إيراد يدوي + صرف عمولات (لا تعد السلفة مصروفاً)
 supabase/20260912_exams_complaints.sql           # محاولات الاختبارات المتعددة + طرق عرض النتيجة + قسم الشكاوي
 supabase/20260912_survey_model.sql               # نموذج الاستبيان الكامل (أنواع أسئلة/جمهور/موعد/خصوصية)
 supabase/20260912_grade_order.sql                # ترتيب المراحل الدراسية يدوياً

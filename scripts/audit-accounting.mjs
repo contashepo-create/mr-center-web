@@ -1,14 +1,11 @@
 import { readFileSync, readdirSync } from 'node:fs';
 
-// نجمع كل ملفات SQL (المخطط الأساسي + الترحيلات) لأن دالة record_payment
-// وبوابة المحاسبة تُعرَّف في ترحيلات idempotent منفصلة.
-const sql = readdirSync('supabase')
-  .filter((f) => f.endsWith('.sql'))
-  .map((f) => readFileSync(`supabase/${f}`, 'utf8'))
-  .join('\n');
+// يجمع المخطط والترحيلات لأن كل ترقية محاسبية تضاف بصورة idempotent منفصلة.
+const sql = readdirSync('supabase').filter((f) => f.endsWith('.sql')).map((f) => readFileSync(`supabase/${f}`, 'utf8')).join('\n');
 const api = readFileSync('src/lib/api.ts', 'utf8');
 const page = readFileSync('app/admin/accounting/page.tsx', 'utf8');
-const custody = readFileSync('app/admin/custody/page.tsx', 'utf8');
+const custody = readFileSync('src/components/accounting/custody-workspace.tsx', 'utf8');
+const accounting = readFileSync('src/lib/accounting.ts', 'utf8');
 
 const issues = [];
 const has = (text, re, label) => { if (!re.test(text)) issues.push(label); };
@@ -34,20 +31,34 @@ has(sql, /p_amount > \(v_due - v_paid\)/, 'SQL: record_payment must reject payme
 has(sql, /collected_by, collected_by_name/, 'SQL: record_payment must store collector identity');
 has(sql, /due_not_found/, 'SQL: record_payment does not reject missing due records');
 
-if (/kind:\s*['"]income['"]/.test(page) || /kind:\s*form\.kind/.test(page) || /setForm\([^)]*kind/.test(page)) {
-  issues.push('Accounting UI: manual income entry is enabled; income must come from payment_collection trigger only');
-}
-has(page, /kind:\s*'expense'/, 'Accounting UI: manual ledger entries are not forced to expense');
+// السلف والرواتب: لا يكفي تغيير واجهة العرض؛ نتحقق من الحقول وRPC الذرية وقاعدة التقرير.
+has(sql, /ADD COLUMN IF NOT EXISTS affects_profit boolean/i, 'SQL: ledger must distinguish profit effect from cash movement');
+has(sql, /CREATE POLICY ledger_owner_read[\s\S]{0,220}FOR SELECT/i, 'SQL: direct owner ledger writes must be replaced with guarded RPCs');
+has(sql, /ADD COLUMN IF NOT EXISTS gross_amount/i, 'SQL: payroll gross amount migration is missing');
+has(sql, /ADD COLUMN IF NOT EXISTS advance_applied/i, 'SQL: payroll advance settlement migration is missing');
+has(sql, /SET affects_profit = false[\s\S]{0,100}entry_type = 'advance'/i, 'SQL: advances must be excluded from profit impact');
+has(sql, /CREATE OR REPLACE FUNCTION public\.record_staff_advance/i, 'SQL: atomic staff advance RPC is missing');
+has(sql, /CREATE OR REPLACE FUNCTION public\.record_payroll_settlement/i, 'SQL: atomic payroll settlement RPC is missing');
+has(sql, /advance_exceeds_balance/i, 'SQL: payroll must reject settling more than the advance balance');
+has(sql, /entry_type IN \('advance','salary'\)[\s\S]{0,120}FOR UPDATE/i, 'SQL: payroll must lock advance rows before settlement');
+has(sql, /CREATE OR REPLACE FUNCTION public\.record_staff_commission_payment/i, 'SQL: commission payment RPC is missing');
+has(sql, /CREATE OR REPLACE FUNCTION public\.record_manual_ledger_entry/i, 'SQL: secure manual ledger RPC is missing');
+has(accounting, /entry_type === 'advance'[\s\S]{0,120}return 0/, 'Client accounting rules must exclude advances from operating cost');
+has(accounting, /gross_amount \?\? row\.amount/, 'Client accounting rules must use gross payroll cost');
+has(page, /record_manual_ledger_entry/, 'Accounting UI: manual income/expense RPC is not connected');
+has(page, /record_payroll_settlement/, 'Accounting UI: payroll settlement RPC is not connected');
+has(page, /record_staff_advance/, 'Accounting UI: staff advance RPC is not connected');
+has(page, /record_staff_commission_payment/, 'Accounting UI: commission payment RPC is not connected');
 has(page, /payment_collection/, 'Accounting UI: automatic payment_collection income is not surfaced');
 has(page, /staff_commission_rules/, 'Accounting UI: commission rules are not connected');
 has(page, /buildPayrollReportHtml/, 'Accounting UI: payroll report export is missing');
-has(page, /مصدر الإيراد الوحيد/, 'Accounting UI: anti-duplicate-income notice is missing');
-
-has(custody, /submit_staff_custody/, 'Custody UI: submit_staff_custody RPC is missing');
-has(custody, /review_staff_custody/, 'Custody UI: review_staff_custody RPC is missing');
+has(page, /دفعات الطلاب لا تُدخل يدوياً/, 'Accounting UI: student-payment duplicate-income warning is missing');
+has(page, /CustodyWorkspace embedded/, 'Accounting UI: custody must be integrated as a tab');
+has(custody, /submit_staff_custody/, 'Custody workspace: submit_staff_custody RPC is missing');
+has(custody, /review_staff_custody/, 'Custody workspace: review_staff_custody RPC is missing');
 
 if (issues.length) {
   console.error('❌ accounting audit failed:\n' + issues.map((x) => `- ${x}`).join('\n'));
   process.exit(1);
 }
-console.log('✅ accounting audit passed (ledger, payment trigger, custody, payroll, commissions)');
+console.log('✅ accounting audit passed (ledger, settlement-safe payroll, advances, custody, commissions, reports)');
