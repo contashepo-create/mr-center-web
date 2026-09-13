@@ -267,25 +267,23 @@ END; $$;
 GRANT EXECUTE ON FUNCTION public.close_fiscal_year(UUID) TO authenticated;
 
 -- ----------------------------------------------------------------------------
--- ٥) العهدة: اعتماد تلقائي كأنها سليمة عندما تكون المحاسبة غير مفعلة للسنتر
---     (تسجيل الإيرادات يبقى سليماً في الخلفية دائماً عبر trigger الدفعات).
+-- ٥) العهدة: التحصيل والتسليم عمليتان تشغيليتان تستمران حتى عند انتهاء
+-- الاشتراك، لكن لا يجوز وصف عجز حقيقي بأنه «مطابق». تسوية العجز المالية نفسها
+-- تبقى داخل بوابة المحاسبة وتتاح فور التجديد مع الاحتفاظ بكل الفروق المسجلة.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.submit_staff_custody(p_staff UUID, p_date DATE, p_delivered NUMERIC, p_notes TEXT DEFAULT '')
 RETURNS UUID LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE cid UUID; expected NUMERIC; result UUID; v_status TEXT;
+  v_date DATE := COALESCE(p_date, CURRENT_DATE); v_delivered NUMERIC := COALESCE(p_delivered, -1);
 BEGIN
   SELECT center_id INTO cid FROM public.profiles WHERE id = auth.uid() AND role IN ('manager','secretary') AND is_active;
   IF cid IS NULL OR p_staff <> auth.uid() THEN RAISE EXCEPTION 'not_allowed'; END IF;
+  IF v_delivered < 0 THEN RAISE EXCEPTION 'invalid_custody_amount'; END IF;
   SELECT COALESCE(SUM(amount), 0) INTO expected FROM public.center_ledger
-   WHERE center_id = cid AND created_by = p_staff AND entry_type = 'payment_collection' AND occurred_on = p_date;
-  IF public.center_accounting_enabled(cid) THEN
-    v_status := CASE WHEN p_delivered = expected THEN 'matched' WHEN p_delivered < expected THEN 'shortage' ELSE 'surplus' END;
-  ELSE
-    -- الخدمة غير مفعلة: اعتماد تلقائي كأن العهدة سليمة حتى تبقى الحسابات نظيفة في الخلفية
-    v_status := 'matched';
-  END IF;
+   WHERE center_id = cid AND created_by = p_staff AND entry_type = 'payment_collection' AND occurred_on = v_date;
+  v_status := CASE WHEN v_delivered = expected THEN 'matched' WHEN v_delivered < expected THEN 'shortage' ELSE 'surplus' END;
   INSERT INTO public.staff_custody(center_id, staff_id, custody_date, expected_amount, delivered_amount, status, notes, submitted_at, submitted_by)
-  VALUES(cid, p_staff, p_date, expected, GREATEST(p_delivered, 0), v_status, COALESCE(p_notes, ''), now(), auth.uid())
+  VALUES(cid, p_staff, v_date, expected, v_delivered, v_status, COALESCE(p_notes, ''), now(), auth.uid())
   ON CONFLICT(center_id, staff_id, custody_date) DO UPDATE
    SET expected_amount = EXCLUDED.expected_amount, delivered_amount = EXCLUDED.delivered_amount,
        status = EXCLUDED.status, notes = EXCLUDED.notes, submitted_at = now(), submitted_by = auth.uid()

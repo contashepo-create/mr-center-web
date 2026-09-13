@@ -30,8 +30,12 @@ export type Custody = {
 };
 
 const value = (amount: number | string | null | undefined) => Number(amount || 0);
-function custodyLabel(status: Custody['status'], delivered: number) {
+function custodyLabel(status: Custody['status'], delivered: number, shortage = 0, resolved = 0) {
   if (status === 'matched') return ['مطابقة ومعتمدة', 'success'] as const;
+  // يظل فرق النقد حقيقة مسجلة، لكن لا يصح وصفه بأنه «يحتاج متابعة» بعد
+  // اعتماد معالجته كاملةً بخصم الموظف أو مصروف السنتر.
+  if (status === 'shortage' && shortage > 0 && resolved >= shortage) return ['عجز تمت تسويته', 'warn'] as const;
+  if (status === 'shortage' && resolved > 0) return ['عجز مسوّى جزئياً', 'warn'] as const;
   if (status === 'shortage') return ['عجز يحتاج متابعة', 'danger'] as const;
   if (status === 'surplus') return ['زيادة بحاجة لتفسير', 'warn'] as const;
   if (status === 'submitted') return ['بانتظار مراجعة', 'info'] as const;
@@ -39,7 +43,7 @@ function custodyLabel(status: Custody['status'], delivered: number) {
 }
 
 /** مساحة العهدة ضمن المحاسبة: تعرض التحصيل المتوقع فوراً ثم التسليم والمطابقة في تدفق واحد. */
-export function CustodyWorkspace({ embedded = false }: { embedded?: boolean }) {
+export function CustodyWorkspace({ embedded = false, onChanged }: { embedded?: boolean; /** يعيد تحميل ملخص المحاسبة الأب بعد معالجة تؤثر في الرواتب/الدفتر. */ onChanged?: () => void | Promise<void> }) {
   const { profile, features } = useSession();
   const toast = useToast();
   const centerId = profile?.center_id;
@@ -107,6 +111,7 @@ export function CustodyWorkspace({ embedded = false }: { embedded?: boolean }) {
       setDeliveryOpen(false); setDirty(false);
       toast.success('تم تسجيل تسليم العهدة', delivered === (myToday ? value(myToday.expected_amount) : 0) ? 'المبلغ مطابق للتحصيل المتوقع.' : 'سيظهر الفرق بوضوح للمراجعة.');
       await load();
+      await onChanged?.();
     } catch (err) { setError(err); } finally { setBusy(false); }
   };
   const openSettlement = (row: Custody) => {
@@ -125,6 +130,7 @@ export function CustodyWorkspace({ embedded = false }: { embedded?: boolean }) {
       setSettlementOpen(false); setSettlementRow(null); setDirty(false);
       toast.success('تمت مراجعة العهدة', delivered === expected ? 'تم اعتماد المطابقة.' : delivered < expected ? `سجل عجز قدره ${formatMoney(expected - delivered)}.` : `سجلت زيادة قدرها ${formatMoney(delivered - expected)}.`);
       await load();
+      await onChanged?.();
     } catch (err) { setError(err); } finally { setBusy(false); }
   };
   const openShortageResolution = (row: Custody) => {
@@ -143,13 +149,17 @@ export function CustodyWorkspace({ embedded = false }: { embedded?: boolean }) {
       const { error: rpcError } = await getSupabase().rpc('resolve_staff_custody_shortage', { p_custody: shortageRow.id, p_method: shortageMethod, p_amount: amountToResolve, p_note: shortageNote.trim() });
       if (rpcError) throw rpcError;
       setShortageOpen(false); setShortageRow(null); setDirty(false);
-      toast.success('تمت تسوية عجز العهدة', shortageMethod === 'expense' ? 'سُجل العجز مصروفاً تشغيلياً على السنتر.' : 'سُجل خصماً على صاحب العهدة وسيُقترح عند صرف راتبه.');
+      toast.success('تمت تسوية عجز العهدة', shortageMethod === 'expense' ? 'سُجل العجز مصروفاً تشغيلياً على السنتر.' : 'سُجل خصماً على صاحب العهدة وسيُقترح الآن تلقائياً عند صرف راتب الموظف.');
       await load();
+      await onChanged?.();
     } catch (err) { setError(err); } finally { setBusy(false); }
   };
   const printCustody = () => void printCenterReport(profile?.center_id, (branding) => buildCustodyReportHtml('كشف العهدة والتحصيل', `${currentMonth} — حتى ${todayIso()}`, monthRows.map((row) => {
-    const [label] = custodyLabel(row.status, value(row.delivered_amount));
-    return [formatDate(row.custody_date), row.staff_name, formatMoney(value(row.expected_amount)), formatMoney(value(row.delivered_amount)), label, row.notes || '—'];
+    const expected = value(row.expected_amount); const delivered = value(row.delivered_amount);
+    const shortage = Math.max(0, expected - delivered); const resolved = Math.min(shortage, value(row.shortage_resolved_amount));
+    const [label] = custodyLabel(row.status, delivered, shortage, resolved);
+    const settlement = !shortage ? '—' : resolved ? `${row.shortage_resolution === 'expense' ? 'مصروف على السنتر' : row.shortage_resolution === 'deduction' ? 'خصم على الموظف' : 'تسوية مختلطة'} · ${formatMoney(resolved)}` : 'لم يُسوَّ بعد';
+    return [formatDate(row.custody_date), row.staff_name, formatMoney(expected), formatMoney(delivered), label, settlement, row.notes || '—'];
   }), { name: profile?.full_name, branding }));
 
   return <>
@@ -170,7 +180,7 @@ export function CustodyWorkspace({ embedded = false }: { embedded?: boolean }) {
       {visible.length === 0 ? <EmptyState title="لا يوجد تحصيل أو تسليم مسجل بعد" body="بمجرد تسجيل الموظف لتحصيل طالب، سيظهر هنا تلقائياً كمبلغ متوقع للعهدة." /> : <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>١. المتوقع</th><th>٢. المسلم</th><th>٣. النتيجة</th><th>الفرق</th><th>تسوية العجز</th><th>ملاحظات</th>{ownerReview ? <th>الإجراء</th> : null}</tr></thead><tbody>{visible.map((row) => {
         const expected = value(row.expected_amount); const delivered = value(row.delivered_amount); const difference = delivered - expected;
         const shortage = Math.max(0, expected - delivered); const resolved = Math.min(shortage, value(row.shortage_resolved_amount)); const remainingShortage = Math.max(0, shortage - resolved);
-        const [label, tone] = custodyLabel(row.status, delivered);
+        const [label, tone] = custodyLabel(row.status, delivered, shortage, resolved);
         const resolutionLabel = row.shortage_resolution === 'expense' ? 'مصروف على السنتر' : row.shortage_resolution === 'deduction' ? 'خصم على الموظف' : row.shortage_resolution === 'mixed' ? 'مصروف وخصم' : '';
         return <tr key={`${row.staff_id}-${row.custody_date}`}><td>{formatDate(row.custody_date)}</td><td><strong>{row.staff_name}</strong></td><td>{formatMoney(expected)}</td><td>{row.submitted_at ? formatMoney(delivered) : <span className="muted">لم يُسلّم بعد</span>}</td><td><Badge tone={tone}>{label}</Badge></td><td style={{ color: difference === 0 ? 'var(--success)' : difference < 0 ? 'var(--danger)' : 'var(--warn)' }}>{row.submitted_at ? `${difference > 0 ? '+' : ''}${formatMoney(difference)}` : '—'}</td><td>{shortage > 0 ? <div className="custody-resolution-cell"><strong style={{ color: remainingShortage ? 'var(--danger)' : 'var(--success)' }}>{remainingShortage ? `متبقٍ ${formatMoney(remainingShortage)}` : 'تمت التسوية'}</strong>{resolved > 0 ? <small>{resolutionLabel} · سُوّي {formatMoney(resolved)}</small> : <small>لم يُسوَّ بعد</small>}</div> : '—'}</td><td>{row.notes || '—'}</td>{ownerReview ? <td>{row.staff_id ? <div className="row custody-actions"><Button type="button" variant={row.status === 'matched' ? 'ghost' : 'secondary'} onClick={() => openSettlement(row)}>{row.submitted_at ? 'مراجعة' : 'تسجيل تسليم'}</Button>{row.status === 'shortage' && remainingShortage > 0 && row.id ? <Button type="button" variant="secondary" onClick={() => openShortageResolution(row)}>تسوية العجز</Button> : null}</div> : <span className="tiny muted">قيد قديم غير منسوب</span>}</td> : null}</tr>;
       })}</tbody></table></div>}

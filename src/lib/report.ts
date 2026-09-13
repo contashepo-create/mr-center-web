@@ -80,7 +80,7 @@ export function buildPayrollReportHtml(employee: { name: string; role?: string }
 }
 
 export function buildCustodyReportHtml(title: string, period: string, rows: string[][], operator?: ReportOperator): string {
-  return buildReportHtml(title, period, [{ title: 'التحصيل والتسليم والمطابقة', headers: ['التاريخ', 'الموظف', 'التحصيل المتوقع', 'المسلّم للخزينة', 'النتيجة', 'ملاحظات'], rows }], operator);
+  return buildReportHtml(title, period, [{ title: 'التحصيل والتسليم والمطابقة', headers: ['التاريخ', 'الموظف', 'التحصيل المتوقع', 'المسلّم للخزينة', 'النتيجة', 'تسوية العجز', 'ملاحظات'], rows }], operator);
 }
 
 /** يجلب الهوية الحالية قبل الطباعة، فلا تحتاج كل صفحة لإعادة تنفيذ الاستعلام نفسه. */

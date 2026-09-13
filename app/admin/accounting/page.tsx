@@ -165,7 +165,9 @@ export default function AccountingPage() {
   const selectedEmployeeAdvance = useMemo(() => payrollForm.employee_id ? summarizeEmployeePayroll(rows, payrollForm.employee_id).advancesOutstanding : 0, [rows, payrollForm.employee_id]);
 
   const load = async () => {
-    if (!centerId || !owner) return;
+    // قبل/بعد انتهاء الاشتراك لا نطلب أي سجل مالي في الواجهة؛ تبقى صفحة
+    // المعلومات وطلب التفعيل فقط، والحاجز الخادمي هو طبقة الحماية الثانية.
+    if (!centerId || !owner || !features?.accounting) return;
     setError(null);
     try {
       const sb = getSupabase();
@@ -185,7 +187,7 @@ export default function AccountingPage() {
       if (!ruleForm.staff_id && staffRows[0]) setRuleForm((value) => ({ ...value, staff_id: staffRows[0].id }));
     } catch (err) { setError(err); }
   };
-  useEffect(() => { void load(); }, [centerId, owner]);
+  useEffect(() => { void load(); }, [centerId, owner, features?.accounting]);
 
   if (profile && !owner) {
     if (canDeliverCustody) return <CustodyWorkspace embedded />;
@@ -372,7 +374,7 @@ export default function AccountingPage() {
 
     {tab === 'commissions' ? <div className="stack-lg"><div className="grid grid-2"><Card className="stack"><div className="row-between"><h2 className="h3">عمولات التحصيل</h2><Button type="button" variant="secondary" onClick={() => { setRuleForm({ staff_id: staff[0]?.id ?? '', rate: '3', starts_on: todayIso(), ends_on: '', is_active: true }); setRuleDirty(false); setError(null); setRuleOpen(true); }}>+ قاعدة عمولة</Button></div><p className="muted small">تُحتسب تقديرياً من تحصيل كل موظف في الفترة حسب النسبة السارية.</p>{rules.length === 0 ? <EmptyState title="لم تضف قاعدة عمولة بعد" body="حدد نسبة عمولة للمحصل ثم راقب المستحقات هنا." /> : <div className="table-wrap"><table><thead><tr><th>الموظف</th><th>النسبة</th><th>من</th><th>إلى</th><th>الحالة</th></tr></thead><tbody>{rules.map((rule) => <tr key={rule.id}><td>{staffName.get(rule.staff_id) ?? 'موظف'}</td><td>{rule.rate}%</td><td>{formatDate(rule.starts_on)}</td><td>{rule.ends_on ? formatDate(rule.ends_on) : 'مفتوحة'}</td><td><Badge tone={rule.is_active ? 'success' : 'default'}>{rule.is_active ? 'فعالة' : 'موقوفة'}</Badge></td></tr>)}</tbody></table></div>}</Card><Card className="stack"><div className="row-between"><h2 className="h3">صرف عمولة</h2><Button type="button" onClick={() => { setCommissionPay({ employee_id: staff[0]?.id ?? '', amount: '', occurred_on: todayIso(), description: '' }); setCommissionPayDirty(false); setError(null); setCommissionPayOpen(true); }}>+ صرف عمولة</Button></div><Notice tone="info">يمكن أيضاً إدراج العمولة داخل تسوية الراتب؛ سيظهر صرفها هنا ضمن المدفوع.</Notice><div className="kpi"><span className="muted">إجمالي المتبقي تقديرياً</span><div className="kpi-value">{money(collectorTotals.reduce((sum, item) => sum + Math.max(0, item.due - item.paid), 0))}</div></div></Card></div><Card className="stack"><h2 className="h3">تحصيل وعمولات الفترة</h2>{collectorTotals.length === 0 ? <EmptyState title="لا يوجد تحصيل مسجل للموظفين في هذه الفترة" /> : <div className="table-wrap"><table><thead><tr><th>الموظف</th><th>المحصل</th><th>النسبة</th><th>المستحق</th><th>المصروف</th><th>المتبقي</th></tr></thead><tbody>{collectorTotals.map((item) => <tr key={item.id}><td>{item.name}</td><td>{money(item.collected)}</td><td>{item.rate}%</td><td>{money(item.due)}</td><td>{money(item.paid)}</td><td><strong style={{ color: item.due > item.paid ? 'var(--danger)' : 'var(--success)' }}>{money(Math.max(0, item.due - item.paid))}</strong></td></tr>)}</tbody></table></div>}</Card></div> : null}
 
-    {tab === 'custody' ? <CustodyWorkspace embedded /> : null}
+    {tab === 'custody' ? <CustodyWorkspace embedded onChanged={load} /> : null}
 
     {tab === 'years' ? <Card className="stack"><div className="row-between"><div><h2 className="h3">السنة المالية</h2><p className="muted small">عند الإغلاق يرحّل النظام الرصيد والمستحقات المعلقة إلى السنة التالية.</p></div>{openYear ? <Button type="button" variant="secondary" disabled={closing} onClick={() => void closeYear()}>{closing ? 'جارٍ الإغلاق…' : 'إغلاق السنة وفتح التالية'}</Button> : null}</div>{years.length === 0 ? <EmptyState title="لا توجد سنة مالية" body="تُنشأ السنة تلقائياً مع تفعيل المحاسبة." /> : <div className="table-wrap"><table><thead><tr><th>السنة</th><th>تبدأ</th><th>تنتهي</th><th>الحالة</th><th>افتتاحي</th><th>إيرادات</th><th>تكلفة تشغيل</th><th>ختامي</th><th>معلق</th></tr></thead><tbody>{years.map((year) => <tr key={year.id}><td><strong>{year.year_label}</strong></td><td>{formatDate(year.starts_on)}</td><td>{year.ends_on ? formatDate(year.ends_on) : '—'}</td><td><Badge tone={year.status === 'open' ? 'success' : 'default'}>{year.status === 'open' ? 'مفتوحة' : 'مغلقة'}</Badge></td><td>{money(valueOf(year.opening_balance))}</td><td>{year.closing_income === null ? '—' : money(valueOf(year.closing_income))}</td><td>{year.closing_expense === null ? '—' : money(valueOf(year.closing_expense))}</td><td>{year.closing_balance === null ? '—' : money(valueOf(year.closing_balance))}</td><td>{year.closing_pending_dues === null ? '—' : money(valueOf(year.closing_pending_dues))}</td></tr>)}</tbody></table></div>}</Card> : null}
 
