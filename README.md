@@ -189,6 +189,7 @@ supabase/20260912_survey_model.sql               # نموذج الاستبيان
 supabase/20260912_grade_order.sql                # ترتيب المراحل الدراسية يدوياً
 supabase/20260912_exam_ornaments_images.sql      # زخارف ورقة الاختبار + صور الأسئلة + إخفاء مفتاح التصحيح
 supabase/20260913_exam_workspace.sql              # مسار ورقي/إلكتروني + نطاق مجموعات + جدولة الإتاحة للاختبارات
+supabase/20260913_student_transfer_requests.sql   # طلب انتقال بمجموعتي المصدر/الوجهة + موافقة تنقل الطالب ذرياً
 ```
 
 ---

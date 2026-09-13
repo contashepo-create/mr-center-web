@@ -23,7 +23,7 @@ ALTER TABLE public.app_exams ADD CONSTRAINT app_exams_online_mode_check CHECK (o
 ALTER TABLE public.app_exams DROP CONSTRAINT IF EXISTS app_exams_availability_mode_check;
 ALTER TABLE public.app_exams ADD CONSTRAINT app_exams_availability_mode_check CHECK (availability_mode IN ('always', 'scheduled'));
 ALTER TABLE public.app_exams DROP CONSTRAINT IF EXISTS app_exams_paper_template_check;
-ALTER TABLE public.app_exams ADD CONSTRAINT app_exams_paper_template_check CHECK (paper_template IN ('classic', 'modern', 'formal'));
+ALTER TABLE public.app_exams ADD CONSTRAINT app_exams_paper_template_check CHECK (paper_template IN ('classic', 'lab', 'life', 'cosmos', 'explorer', 'royal', 'parchment', 'wedding', 'modern', 'formal'));
 ALTER TABLE public.app_exams DROP CONSTRAINT IF EXISTS app_exams_availability_range_check;
 ALTER TABLE public.app_exams ADD CONSTRAINT app_exams_availability_range_check
   CHECK (availability_mode = 'always' OR (available_from IS NOT NULL AND available_until IS NOT NULL AND available_from < available_until));

@@ -1200,10 +1200,13 @@ export async function fetchMyInquiries(studentId: string): Promise<AppInquiry[]>
 
 export async function addInquiry(input: {
   centerId: string; studentId: string; kind: InquiryKind; subject: string; body: string;
+  fromGroupId?: string | null; toGroupId?: string | null;
 }): Promise<void> {
   const { error } = await getSupabase().from('app_inquiries').insert({
     id: uuid(), center_id: input.centerId, student_id: input.studentId,
     kind: input.kind, subject: input.subject.trim(), body: input.body.trim(),
+    from_group_id: input.kind === 'transfer' ? input.fromGroupId ?? null : null,
+    to_group_id: input.kind === 'transfer' ? input.toGroupId ?? null : null,
     status: 'pending', created_at: nowIso(), updated_at: nowIso(),
   });
   if (error) throw error;
@@ -1212,6 +1215,14 @@ export async function addInquiry(input: {
 export async function replyInquiry(id: string, reply: string, status: InquiryStatus): Promise<void> {
   const { error } = await getSupabase().from('app_inquiries')
     .update({ reply: reply.trim(), status, updated_at: nowIso() }).eq('id', id);
+  if (error) throw error;
+}
+
+/** قبول/رفض طلب نقل موثق؛ القبول يغيّر المجموعة الأساسية داخل RPC ذرية. */
+export async function resolveStudentTransfer(id: string, status: 'approved' | 'rejected', reply = ''): Promise<void> {
+  const { error } = await getSupabase().rpc('resolve_student_transfer', {
+    p_inquiry_id: id, p_status: status, p_reply: reply.trim() || null,
+  });
   if (error) throw error;
 }
 

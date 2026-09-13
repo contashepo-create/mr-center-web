@@ -18,8 +18,33 @@ function defaultAnswer(q: ExamQuestion): ExamAnswer {
 
 function isAnswered(q: ExamQuestion, a: ExamAnswer): boolean {
   if (q.type === 'mcq' || q.type === 'tf') return a !== null && a !== undefined && a !== '';
-  if (q.type === 'multi' || q.type === 'match') return Array.isArray(a) && a.length > 0;
+  if (q.type === 'multi') return Array.isArray(a) && a.length > 0;
+  if (q.type === 'match') return Array.isArray(a) && a.length === (q.pairs?.length ?? 0) && a.every((item) => typeof item === 'number' && item >= 0);
   return typeof a === 'string' && a.trim() !== '';
+}
+
+/** مطابقة تفاعلية باللمس أو الفأرة: اختر بنداً من العمود (أ) ثم المطابق من (ب)، بلا قوائم منسدلة. */
+function InteractiveMatch({ pairs, value, onChange }: { pairs: { l: string; r: string }[]; value: number[]; onChange: (value: ExamAnswer) => void }) {
+  const [activeLeft, setActiveLeft] = useState<number | null>(null);
+  useEffect(() => setActiveLeft(null), [pairs]);
+  const mapping = pairs.map((_, index) => typeof value[index] === 'number' ? value[index] : -1);
+  const firstUnmatched = mapping.findIndex((rightIndex) => rightIndex < 0);
+  const connect = (rightIndex: number) => {
+    const leftIndex = activeLeft ?? firstUnmatched;
+    if (leftIndex < 0) return;
+    const next = [...mapping];
+    // لا يمكن إسناد بند من العمود (ب) إلى بندين؛ ننقله بدلاً من ذلك.
+    const previousLeft = next.findIndex((assigned) => assigned === rightIndex);
+    if (previousLeft >= 0 && previousLeft !== leftIndex) next[previousLeft] = -1;
+    next[leftIndex] = rightIndex;
+    onChange(next);
+    setActiveLeft(next.findIndex((assigned) => assigned < 0));
+  };
+  const clear = (leftIndex: number) => { const next = [...mapping]; next[leftIndex] = -1; onChange(next); setActiveLeft(leftIndex); };
+  return <div className="interactive-match" dir="rtl">
+    <div className="interactive-match-help"><strong>وصّل بين العمودين</strong><span>اضغط بنداً من (أ)، ثم اختر المطابق من (ب).</span><Badge tone="info">{mapping.filter((item) => item >= 0).length} / {pairs.length}</Badge></div>
+    <div className="interactive-match-grid"><div className="match-column"><span className="match-column-title">العمود (أ)</span>{pairs.map((pair, leftIndex) => <button type="button" key={`left-${leftIndex}`} className={`match-card left ${activeLeft === leftIndex ? 'active' : ''} ${mapping[leftIndex] >= 0 ? 'matched' : ''}`} onClick={() => setActiveLeft(leftIndex)}><span className="match-index">{leftIndex + 1}</span><span>{pair.l || `البند ${leftIndex + 1}`}</span>{mapping[leftIndex] >= 0 ? <em onClick={(event) => { event.stopPropagation(); clear(leftIndex); }} title="إلغاء هذا الربط">×</em> : null}</button>)}</div><div className="match-connector-column" aria-hidden="true">{pairs.map((_, index) => <span key={index} className={mapping[index] >= 0 ? 'connected' : ''}>↔</span>)}</div><div className="match-column"><span className="match-column-title">العمود (ب)</span>{pairs.map((pair, rightIndex) => { const usedBy = mapping.indexOf(rightIndex); return <button type="button" key={`right-${rightIndex}`} className={`match-card right ${activeLeft !== null && mapping[activeLeft] === rightIndex ? 'paired-active' : ''} ${usedBy >= 0 ? 'used' : ''}`} onClick={() => connect(rightIndex)}><span className="match-index">{CHOICE_KEYS[rightIndex] ?? rightIndex + 1}</span><span>{pair.r || `البند ${rightIndex + 1}`}</span>{usedBy >= 0 ? <small>مرتبط بـ {usedBy + 1}</small> : null}</button>; })}</div></div>
+  </div>;
 }
 
 function QuestionInput({ q, value, onChange }: { q: ExamQuestion; value: ExamAnswer; onChange: (v: ExamAnswer) => void }) {
@@ -31,11 +56,7 @@ function QuestionInput({ q, value, onChange }: { q: ExamQuestion; value: ExamAns
     const arr = Array.isArray(value) ? value : [];
     return <div className="stack">{q.choices.map((c, i) => <label key={i} className="row small" style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 14, background: 'var(--soft)' }}><input type="checkbox" checked={arr.includes(i)} onChange={(e) => onChange(e.target.checked ? [...arr, i] : arr.filter((x) => x !== i))} /> {CHOICE_KEYS[i]}) {c}</label>)}</div>;
   }
-  if (q.type === 'match') {
-    const arr = Array.isArray(value) ? value : [];
-    const pairs = q.pairs ?? [];
-    return <div className="stack">{pairs.map((p, i) => <div key={i} className="grid grid-2"><div className="notice">{p.l}</div><select className="select" value={arr[i] ?? ''} onChange={(e) => { const next = [...arr]; next[i] = Number(e.target.value); onChange(next); }}><option value="">اختر المطابق</option>{pairs.map((x, idx) => <option key={idx} value={idx}>{x.r}</option>)}</select></div>)}</div>;
-  }
+  if (q.type === 'match') return <InteractiveMatch pairs={q.pairs ?? []} value={Array.isArray(value) ? value : []} onChange={onChange} />;
   return <Input label="إجابتك" value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} />;
 }
 

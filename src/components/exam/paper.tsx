@@ -8,7 +8,7 @@
 // + صورة السؤال حسب المكان والحجم المختارين.
 // ============================================================
 
-import type { ExamOrnaments, ExamQuestion } from '@/lib/types';
+import type { ExamOrnaments, ExamQuestion, PaperTemplate } from '@/lib/types';
 import { EXAM_TYPE_LABEL } from '@/lib/utils';
 import { arabicNum, CHOICE_KEYS, paperSections } from '@/lib/exam-egyptian';
 import { PaperOrnaments, QuestionImage } from './ornaments';
@@ -30,7 +30,7 @@ export function ExamPaper({
   questions: ExamQuestion[];
   ornaments?: ExamOrnaments | null;
   centerName?: string | null;
-  template?: 'classic' | 'modern' | 'formal';
+  template?: PaperTemplate;
 }) {
   const sections = paperSections(questions);
   return (

@@ -296,7 +296,8 @@ export type ExamResultMode = 'after_each' | 'end' | 'never';
 export type ExamDeliveryMode = 'paper' | 'online';
 export type OnlineExamMode = 'objective' | 'essay' | 'mixed';
 export type ExamAvailabilityMode = 'always' | 'scheduled';
-export type PaperTemplate = 'classic' | 'modern' | 'formal';
+/** قوالب ورقة الاختبار. التسعة الأولى تطابق Center Publish؛ formal يبقي القالب السابق متوافقاً. */
+export type PaperTemplate = 'classic' | 'lab' | 'life' | 'cosmos' | 'explorer' | 'royal' | 'parchment' | 'wedding' | 'modern' | 'formal';
 
 /** كثافة الزخارف حول الورقة */
 export type OrnamentDensity = 'low' | 'medium' | 'high';
@@ -394,6 +395,10 @@ export interface AppInquiry {
   body: string;
   status: InquiryStatus;
   reply: string | null;
+  /** تفاصيل طلب الانتقال؛ موجودة فقط عندما kind = transfer. */
+  from_group_id?: string | null;
+  to_group_id?: string | null;
+  resolved_at?: string | null;
   created_at: string;
   updated_at: string;
 }

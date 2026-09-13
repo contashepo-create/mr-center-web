@@ -5,28 +5,29 @@
    ============================================================ */
 
 :root {
+  /* داكن هادئ: طبقات رمادية مزرقة متوسطة بدلاً من الأسود/الكحلي الحاد. */
   color-scheme: dark;
-  --bg: #0a0f1c;
-  --bg-2: #0d1526;
-  --surface: #121b2f;
-  --surface-2: #18233c;
-  --surface-3: #0e1729;
-  --border: #20304f;
-  --border-strong: #30456e;
-  --text: #e8edf8;
-  --muted: #97a7c4;
-  --muted-2: #64748b;
-  --primary: #5b6bff;
-  --primary-strong: #4a59ee;
-  --primary-soft: rgba(91, 107, 255, 0.14);
+  --bg: #171c25;
+  --bg-2: #1c2330;
+  --surface: #222a36;
+  --surface-2: #293342;
+  --surface-3: #1d2531;
+  --border: #394658;
+  --border-strong: #536278;
+  --text: #edf1f7;
+  --muted: #b1bdce;
+  --muted-2: #8291a7;
+  --primary: #8290ff;
+  --primary-strong: #7180f2;
+  --primary-soft: rgba(130, 144, 255, 0.17);
   --on-primary: #ffffff;
-  --accent: #22c55e;
-  --info: #38bdf8;
-  --warn: #f59e0b;
-  --success: #22c55e;
-  --danger: #ef4444;
-  --shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
-  --shadow-soft: 0 8px 24px rgba(0, 0, 0, 0.22);
+  --accent: #45c98a;
+  --info: #67c7f2;
+  --warn: #f2b45b;
+  --success: #45c98a;
+  --danger: #ff7474;
+  --shadow: 0 16px 42px rgba(2, 6, 13, 0.20);
+  --shadow-soft: 0 7px 20px rgba(2, 6, 13, 0.16);
   --radius: 14px;
 }
 
@@ -754,3 +755,30 @@ tbody tr:hover { background: var(--surface-2); }
 
 @media (max-width: 1050px) { .exam-library-row { align-items: flex-start; flex-wrap: wrap; }.exam-action-set.row { width: 100%; max-width: none; padding: 12px 0 0; border-inline-start: 0; border-top: 1px solid var(--border); }.exam-library-row > .exam-card-icon { margin-top: 2px; } }
 @media (max-width: 600px) { .exam-library-row { gap: 10px; padding: 13px; }.exam-row-main { flex-basis: calc(100% - 48px); }.exam-library-row .exam-action-set.row { justify-content: stretch; }.exam-library-row .exam-action-set.row .btn { flex: 1 1 auto; }.exam-library-card .exam-action-set .btn { flex: 1 1 42%; }.exam-filter-footer { align-items: flex-start; flex-direction: column; }.exam-filter-footer > .row:last-child { width: 100%; justify-content: space-between; } }
+
+/* قوالب الورقة — ألوان ومسميات مطابقة لقوالب Center Publish، مع القالب الرسمي القديم. */
+.template-picker { grid-template-columns: repeat(auto-fit, minmax(155px, 1fr)); }
+.exam-paper-lab { border: 2.5px solid #0f766e; border-radius: 12px; background: #f7fffe; color: #134e4a; }.exam-paper-lab .exam-paper-head { color: #0f766e; border-bottom-color: #5eead4; background: linear-gradient(to left,#f0fdfa,#ecfeff); }
+.exam-paper-life { border: 2.5px solid #166534; border-radius: 12px; background: #f7fff9; color: #14532d; }.exam-paper-life .exam-paper-head { color: #166534; border-bottom-color: #86efac; background: linear-gradient(to left,#f0fdf4,#ecfdf5); }
+.exam-paper-cosmos { border: 2.5px solid #c5a059; border-radius: 12px; background: #fafafe; color: #1e1b4b; }.exam-paper-cosmos .exam-paper-head { color: #fde68a; border-bottom-color: #c5a059; background: #1e1b4b; }.exam-paper-cosmos .exam-paper-title,.exam-paper-cosmos .exam-paper-sub { color: inherit; }
+.exam-paper-explorer { border: 2.5px solid #6366f1; border-radius: 14px; background: #fffefb; color: #1e1b4b; }.exam-paper-explorer .exam-paper-head { color: #1e1b4b; border-bottom-color: #a5b4fc; background: linear-gradient(to left,#eef2ff,#fef3c7,#ecfdf5); }
+.exam-paper-royal { border: 2.5px solid #b8860b; border-radius: 16px; background: #fbf8ef; color: #132a4a; }.exam-paper-royal .exam-paper-head { color: #f8f4e8; border-bottom-color: #d4af37; background: linear-gradient(135deg,#132a4a,#233a5e 60%,#b8860b 130%); }.exam-paper-royal .exam-paper-title,.exam-paper-royal .exam-paper-sub { color: inherit; }
+.exam-paper-parchment { border: 1.5px solid #c9a24b; border-radius: 10px; background: #fdf7ea; color: #5a4326; }.exam-paper-parchment .exam-paper-head { color: #5a4326; border-bottom-color: #dfc37f; background: linear-gradient(135deg,#fbf1dd,#f3e2c0); }
+.exam-paper-wedding { border: 2.5px solid #0b5d43; border-radius: 18px; background: #f2faf6; color: #0b5d43; }.exam-paper-wedding .exam-paper-head { color: #f0faf5; border-bottom-color: #d4af37; background: linear-gradient(135deg,#0b5d43,#14805f 60%,#d4af37 130%); }.exam-paper-wedding .exam-paper-title,.exam-paper-wedding .exam-paper-sub { color: inherit; }
+
+/* التوصيل التفاعلي في الاختبار الإلكتروني */
+.interactive-match { display:grid; gap:12px; padding:13px; border:1px solid color-mix(in srgb,var(--primary) 25%,var(--border)); border-radius:14px; background:color-mix(in srgb,var(--primary) 4%,var(--surface-3)); }
+.interactive-match-help { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }.interactive-match-help span { flex:1; color:var(--muted); font-size:.78rem; }
+.interactive-match-grid { display:grid; grid-template-columns:minmax(0,1fr) 35px minmax(0,1fr); gap:8px; align-items:start; }.match-column { display:grid; gap:7px; }.match-column-title { padding:5px 8px; color:var(--muted); font-size:.76rem; font-weight:800; }.match-card { position:relative; min-height:52px; display:flex; align-items:center; gap:8px; width:100%; padding:9px 10px; border:1px solid var(--border); border-radius:10px; color:var(--text); background:var(--surface); text-align:right; transition:transform .13s ease,border-color .13s ease,background .13s ease; }.match-card:hover { border-color:var(--primary); transform:translateY(-1px); }.match-card.active { border:2px solid var(--primary); background:var(--primary-soft); box-shadow:0 0 0 3px color-mix(in srgb,var(--primary) 15%,transparent); }.match-card.matched { border-color:color-mix(in srgb,var(--success) 55%,var(--border)); }.match-card.right.used { opacity:.72; border-color:color-mix(in srgb,var(--success) 40%,var(--border)); }.match-card.right.paired-active { opacity:1; border-color:var(--primary); background:var(--primary-soft); }.match-card .match-index { width:23px; height:23px; display:grid; place-items:center; flex:0 0 auto; border-radius:50%; color:var(--primary); background:var(--primary-soft); font-size:.72rem; font-weight:900; }.match-card small { margin-inline-start:auto; color:var(--success); font-size:.64rem; white-space:nowrap; }.match-card em { width:22px; height:22px; margin-inline-start:auto; display:grid; place-items:center; border-radius:50%; color:var(--danger); background:color-mix(in srgb,var(--danger) 12%,transparent); font-style:normal; font-weight:900; }.match-connector-column { display:grid; gap:7px; padding-top:29px; }.match-connector-column span { min-height:52px; display:grid; place-items:center; color:var(--muted-2); font-size:.9rem; }.match-connector-column span.connected { color:var(--success); font-weight:900; }
+@media(max-width:520px){.interactive-match-grid{grid-template-columns:1fr}.match-connector-column{display:none}.match-column-title{border-bottom:1px solid var(--border)}.match-card{min-height:48px}}
+
+/* محرر الاختبارات: تسلسل إدخال كامل مثل Center Publish؛ المعاينة تُفتح عند الطلب ولا تزاحم حقول الإدخال. */
+.exam-builder-layout { grid-template-columns: minmax(0, 1fr); max-width: 1060px; margin-inline: auto; }
+.exam-editor-stack { width: 100%; }.exam-preview-col { display: none; }
+
+/* ملف الطالب الشامل */
+.student-profile-hero { display:flex; align-items:center; gap:16px; margin:16px 0; padding:19px 21px; border:1px solid color-mix(in srgb,var(--primary) 30%,var(--border)); border-radius:17px; background:linear-gradient(115deg,color-mix(in srgb,var(--primary) 13%,var(--surface)),var(--surface)); }.student-profile-avatar { width:62px; height:62px; flex:0 0 auto; display:grid; place-items:center; border-radius:18px; color:var(--on-primary); background:var(--primary); font-size:1.6rem; font-weight:900; box-shadow:0 9px 20px color-mix(in srgb,var(--primary) 30%,transparent); }.student-profile-title { min-width:0; flex:1; }.student-profile-title h2,.student-profile-title p { margin:0; }.student-profile-title p { margin-top:5px; color:var(--muted); font-size:.8rem; }.student-profile-badges { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }.student-profile-contact { display:grid; gap:6px; min-width:185px; padding:11px 13px; border:1px solid var(--border); border-radius:11px; color:var(--muted); background:var(--surface-3); font-size:.78rem; }.student-profile-kpis { margin:16px 0; }.student-profile-tabs { display:flex; gap:4px; margin:18px 0; padding:4px; overflow:auto; border:1px solid var(--border); border-radius:12px; background:var(--surface-3); }.student-profile-tabs button { min-height:37px; flex:1 0 max-content; padding:7px 12px; border:0; border-radius:8px; color:var(--muted); background:transparent; font-size:.8rem; font-weight:800; }.student-profile-tabs button:hover { color:var(--text); }.student-profile-tabs button.active { color:var(--on-primary); background:var(--primary); }.profile-details-grid { display:grid; grid-template-columns:minmax(115px,.7fr) minmax(0,1.3fr); gap:0; border:1px solid var(--border); border-radius:11px; overflow:hidden; }.profile-details-grid span,.profile-details-grid strong { padding:10px 12px; border-bottom:1px solid var(--border); font-size:.82rem; }.profile-details-grid span { color:var(--muted); background:var(--surface-3); }.profile-details-grid strong { overflow-wrap:anywhere; }.profile-details-grid > :nth-last-child(-n+2) { border-bottom:0; }.student-teacher-card { display:flex; align-items:flex-start; gap:10px; padding:12px; border:1px solid var(--border); border-radius:12px; background:var(--surface-3); }.teacher-avatar { width:34px; height:34px; display:grid; place-items:center; flex:0 0 auto; border-radius:10px; color:var(--primary); background:var(--primary-soft); font-weight:900; }.student-teacher-card > div { display:grid; min-width:0; gap:3px; }.student-teacher-card strong { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }.student-teacher-card p,.student-teacher-card small { margin:0; color:var(--muted); font-size:.76rem; }.profile-summary-row { display:flex; align-items:center; justify-content:space-between; gap:15px; padding:11px 0; border-bottom:1px solid var(--border); font-size:.84rem; }.profile-summary-row:last-child { border-bottom:0; }.profile-summary-row span { display:grid; gap:3px; color:var(--muted); }.profile-summary-row small { font-size:.69rem; }.profile-activity-mini { display:grid; grid-template-columns:29px minmax(0,1fr) auto; align-items:center; gap:9px; padding:9px 0; border-bottom:1px solid var(--border); }.profile-activity-mini:last-child { border-bottom:0; }.profile-activity-mini > span { width:26px; height:26px; display:grid; place-items:center; border-radius:8px; color:var(--info); background:color-mix(in srgb,var(--info) 12%,transparent); font-weight:900; }.profile-activity-mini > span.success { color:var(--success); background:color-mix(in srgb,var(--success) 12%,transparent); }.profile-activity-mini > span.warn { color:var(--warn); background:color-mix(in srgb,var(--warn) 12%,transparent); }.profile-activity-mini > span.danger { color:var(--danger); background:color-mix(in srgb,var(--danger) 12%,transparent); }.profile-activity-mini strong,.profile-activity-mini p { margin:0; }.profile-activity-mini p,.profile-activity-mini small { color:var(--muted); font-size:.72rem; }.attendance-summary,.academic-score-summary { display:flex; flex-wrap:wrap; gap:8px; }.attendance-summary span,.academic-score-summary span { padding:7px 9px; border:1px solid var(--border); border-radius:9px; color:var(--muted); background:var(--surface-3); font-size:.76rem; }.finance-summary-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }.finance-summary-grid div { display:grid; gap:5px; padding:12px; border:1px solid var(--border); border-radius:11px; background:var(--surface-3); }.finance-summary-grid span { color:var(--muted); font-size:.73rem; }.finance-summary-grid strong { color:var(--primary); font-size:.9rem; }.student-activity-timeline { display:grid; }.student-activity-row { display:grid; grid-template-columns:38px minmax(0,1fr) auto; gap:11px; align-items:center; padding:12px 3px; border-bottom:1px solid var(--border); }.student-activity-row:last-child { border-bottom:0; }.activity-icon { width:31px; height:31px; display:grid; place-items:center; border-radius:10px; color:var(--info); background:color-mix(in srgb,var(--info) 12%,transparent); font-weight:900; }.activity-icon.success { color:var(--success); background:color-mix(in srgb,var(--success) 12%,transparent); }.activity-icon.warn { color:var(--warn); background:color-mix(in srgb,var(--warn) 12%,transparent); }.activity-icon.danger { color:var(--danger); background:color-mix(in srgb,var(--danger) 12%,transparent); }.student-activity-row div { display:grid; gap:3px; }.student-activity-row p,.student-activity-row time { margin:0; color:var(--muted); font-size:.76rem; }.student-activity-row time { white-space:nowrap; }
+@media(max-width:700px){.student-profile-hero{align-items:flex-start;flex-wrap:wrap;padding:16px}.student-profile-contact{width:100%;grid-template-columns:1fr 1fr}.profile-details-grid{grid-template-columns:1fr}.profile-details-grid span{border-bottom:0;padding-bottom:2px}.profile-details-grid strong{padding-top:2px}.profile-details-grid> :nth-last-child(-n+2){border-bottom:1px solid var(--border)}.profile-details-grid>strong:last-child{border-bottom:0}.finance-summary-grid{grid-template-columns:1fr}.student-activity-row{grid-template-columns:34px minmax(0,1fr)}.student-activity-row time{grid-column:2}.profile-activity-mini{grid-template-columns:27px minmax(0,1fr)}.profile-activity-mini small{grid-column:2}}
+
+/* طلبات نقل المجموعة في بوابة الطالب والإدارة */
+.student-transfer-guide { border-color:color-mix(in srgb,var(--success) 35%,var(--border)); background:linear-gradient(115deg,color-mix(in srgb,var(--success) 8%,var(--surface)),var(--surface)); }.student-transfer-guide h2,.student-transfer-guide p { margin:0; }.student-transfer-guide p { margin-top:4px; }.transfer-guide-icon { width:44px;height:44px;display:grid;place-items:center;border-radius:13px;color:var(--success);background:color-mix(in srgb,var(--success) 12%,transparent);font-size:1.35rem;font-weight:900; }.transfer-group-info { display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid var(--border); }.transfer-group-info:last-child{border-bottom:0}.transfer-group-info>span,.inquiry-kind-icon{width:30px;height:30px;display:grid;place-items:center;flex:0 0 auto;border-radius:9px;color:var(--primary);background:var(--primary-soft);font-weight:900}.transfer-group-info div{display:grid;gap:3px}.transfer-group-info p{margin:0;color:var(--muted);font-size:.76rem}.student-inquiry-row { display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:11px;align-items:start;padding:13px 0;border-bottom:1px solid var(--border); }.student-inquiry-row:last-child{border-bottom:0}.inquiry-main{display:grid;gap:6px}.inquiry-main p{margin:0;color:var(--muted);font-size:.83rem}.inquiry-main .notice{margin:1px 0 0}.student-inquiry-row time{color:var(--muted);font-size:.72rem;white-space:nowrap}.transfer-request-route{display:flex;align-items:center;flex-wrap:wrap;gap:9px;padding:10px 12px;border:1px solid color-mix(in srgb,var(--success) 28%,var(--border));border-radius:10px;color:var(--text);background:color-mix(in srgb,var(--success) 7%,var(--surface));font-size:.83rem}.transfer-request-route b{color:var(--success);font-size:1.1rem}@media(max-width:600px){.student-inquiry-row{grid-template-columns:30px minmax(0,1fr)}.student-inquiry-row time{grid-column:2}.transfer-guide-icon{display:none}}
