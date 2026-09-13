@@ -57,6 +57,11 @@ has(page, /record_staff_advance/, 'Accounting UI: staff advance RPC is not conne
 has(page, /record_staff_commission_payment/, 'Accounting UI: commission payment RPC is not connected');
 has(page, /payment_collection/, 'Accounting UI: automatic payment_collection income is not surfaced');
 has(page, /staff_commission_rules/, 'Accounting UI: commission rules are not connected');
+has(page, /ledgerOrder.*'newest'/s, 'Accounting UI: ledger must default to newest-first order');
+has(page, /ledger-sort-toggle/, 'Accounting UI: ledger date-order toggle is missing');
+has(page, /payrollPeriod/, 'Accounting UI: monthly payroll period selector is missing');
+has(page, /belongsToPeriod\(item\.occurred_on, period\)/, 'Accounting UI: payroll proposals must stay inside their month');
+has(sql, /v_period_start DATE := date_trunc\('month'/i, 'SQL: payroll must enforce monthly settlement boundaries');
 has(page, /printEmployeeStatement/, 'Accounting UI: comprehensive employee statement export is missing');
 has(page, /دفعات الطلاب لا تُدخل يدوياً/, 'Accounting UI: student-payment duplicate-income warning is missing');
 has(page, /CustodyWorkspace embedded/, 'Accounting UI: custody must be integrated as a tab');

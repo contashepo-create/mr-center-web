@@ -17,6 +17,7 @@ import { formatDate, formatMoney } from '@/lib/utils';
 import { QrCode } from '@/components/qr-code';
 
 type SettingsTab = 'general' | 'printing';
+type GeneralSettingsSection = 'profile' | 'operations' | 'fiscal' | 'backup';
 
 const initialSettings: CenterSettings = {
   whatsapp: '', contact_email: '', registration_open: true, archive_year: '', print: DEFAULT_CENTER_PRINT_SETTINGS,
@@ -30,12 +31,12 @@ export default function AdminSettingsPage() {
   const [settings, setSettings] = useState<CenterSettings>(initialSettings);
   const [years, setYears] = useState<FiscalYear[]>([]);
   const [tab, setTab] = useState<SettingsTab>('general');
+  const [generalSection, setGeneralSection] = useState<GeneralSettingsSection>('profile');
   const [closing, setClosing] = useState(false);
   const [yearMsg, setYearMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [imageBusy, setImageBusy] = useState(false);
   const [backupBusy, setBackupBusy] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [printPreviewOpen, setPrintPreviewOpen] = useState(false);
   const [settingsDirty, setSettingsDirty] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -66,7 +67,7 @@ export default function AdminSettingsPage() {
     try {
       await saveCenterSettings(centerId, settings);
       toast.success('تم حفظ الإعدادات', 'حُفظت إعدادات السنتر بنجاح.');
-      setSettingsDirty(false); setSettingsOpen(false);
+      setSettingsDirty(false);
     } catch (err) { setError(err); }
     finally { setBusy(false); }
   };
@@ -113,27 +114,27 @@ export default function AdminSettingsPage() {
   };
   const qr = center ? encodeCenterQr(center.id, center.code, center.name) : '';
 
-  const general = <>
-    <div className="grid grid-2">
-      <Card className="stack">
-        <h2 className="h3">بيانات السنتر</h2>
-        <div className="row"><Badge tone="info">{center?.kind === 'solo' ? 'مدرس مستقل' : 'سنتر'}</Badge><Badge tone={center?.status === 'active' ? 'success' : 'danger'}>{center?.status ?? '—'}</Badge></div>
-        <p className="muted">الاسم: <b>{center?.name ?? '—'}</b></p><p className="muted">الكود: <b dir="ltr">{center?.code ?? '—'}</b></p>
-        {qr ? <div className="stack"><QrCode value={qr} /><textarea className="textarea" readOnly dir="ltr" value={qr} /></div> : null}
-        <Button type="button" variant="secondary" disabled={backupBusy || !center} onClick={() => void exportBackup()}>{backupBusy ? 'جاري تجهيز النسخة...' : 'تحميل نسخة احتياطية JSON'}</Button>
-        <p className="muted tiny">تصدير آمن للقراءة فقط من نفس جداول Android ومحكوم بصلاحيات RLS.</p>
-      </Card>
-      <Card className="stack">
-        <h2 className="h3">الإعدادات التشغيلية</h2>
-        <div className="grid grid-2"><Card className="compact soft kpi"><span className="muted">واتساب</span><div className="kpi-value" style={{ fontSize: '1rem' }} dir="ltr">{settings.whatsapp || '—'}</div></Card><Card className="compact soft kpi"><span className="muted">بريد التواصل</span><div className="kpi-value" style={{ fontSize: '1rem' }} dir="ltr">{settings.contact_email || '—'}</div></Card><Card className="compact soft kpi"><span className="muted">السنة/الأرشيف</span><div className="kpi-value" style={{ fontSize: '1rem' }}>{settings.archive_year || '—'}</div></Card><Card className="compact soft kpi"><span className="muted">التسجيل</span><div className="kpi-value" style={{ fontSize: '1rem' }}>{settings.registration_open ? 'مفتوح' : 'مغلق'}</div></Card></div>
-        <Button type="button" onClick={() => { setSettingsDirty(false); setError(null); setSettingsOpen(true); }}>تعديل الإعدادات</Button>
-      </Card>
-    </div>
-    <Card className="stack" style={{ marginTop: 18 }}>
-      <div className="row-between"><div><h2 className="h3">السنة المالية</h2><p className="muted small" style={{ margin: '6px 0 0' }}>فتح وإغلاق السنة الدراسية يتم من هنا مباشرة — بلا ارتباط بقسم المحاسبة، فالسناتر غير المشتركة تتحكم بسنتها أيضاً.</p></div>{years.some((y) => y.status === 'open') ? <Button type="button" variant="secondary" disabled={closing} onClick={() => void closeYear()}>{closing ? 'جارٍ الإغلاق...' : 'إغلاق السنة وفتح سنة جديدة'}</Button> : null}</div>
-      {years.length === 0 ? <p className="muted">لا توجد سنوات مالية مسجلة — تُنشأ تلقائياً مع إنشاء السنتر.</p> : <div className="table-wrap"><table><thead><tr><th>السنة</th><th>تبدأ</th><th>تنتهي</th><th>الحالة</th><th>رصيد افتتاحي</th><th>رصيد الختام</th><th>مستحقات معلقة</th></tr></thead><tbody>{years.map((year) => <tr key={year.id}><td><strong>{year.year_label}</strong></td><td>{formatDate(year.starts_on)}</td><td>{year.ends_on ? formatDate(year.ends_on) : '—'}</td><td><Badge tone={year.status === 'open' ? 'success' : 'default'}>{year.status === 'open' ? 'مفتوحة' : 'مغلقة'}</Badge></td><td>{formatMoney(year.opening_balance)}</td><td>{year.closing_balance === null ? '—' : formatMoney(year.closing_balance)}</td><td>{year.closing_pending_dues === null ? '—' : formatMoney(year.closing_pending_dues)}</td></tr>)}</tbody></table></div>}
+  const general = <section className="settings-general-workspace">
+    <Card className="settings-general-hero">
+      <div className="settings-center-avatar" aria-hidden="true">{(center?.name ?? 'م').trim().slice(0, 1)}</div>
+      <div className="settings-general-hero-copy"><span className="settings-general-kicker">لوحة إدارة السنتر</span><h2>{center?.name ?? 'بيانات السنتر'}</h2><p>إدارة منظمة لهوية السنتر، التشغيل اليومي، السنة المالية والنسخ الاحتياطي من مكان واحد.</p><div className="settings-center-tags"><Badge tone="info">{center?.kind === 'solo' ? 'مدرس مستقل' : 'سنتر تعليمي'}</Badge><Badge tone={center?.status === 'active' ? 'success' : 'danger'}>{center?.status === 'active' ? 'الحساب نشط' : center?.status ?? '—'}</Badge><span className="tiny muted">الكود: <b dir="ltr">{center?.code ?? '—'}</b></span></div></div>
+      <div className="settings-general-hero-action"><span className="tiny muted">آخر حفظ للإعدادات</span><strong>{settingsDirty ? 'توجد تعديلات غير محفوظة' : 'كل التغييرات محفوظة'}</strong><Button type="button" variant="secondary" onClick={() => setTab('printing')}>هوية الطباعة ←</Button></div>
     </Card>
-  </>;
+    <div className="settings-general-console">
+      <nav className="settings-general-nav" aria-label="أقسام الإعدادات العامة">
+        <button type="button" className={generalSection === 'profile' ? 'active' : ''} onClick={() => setGeneralSection('profile')}><span>⌂</span><div><strong>بيانات السنتر</strong><small>الهوية والكود</small></div></button>
+        <button type="button" className={generalSection === 'operations' ? 'active' : ''} onClick={() => setGeneralSection('operations')}><span>⚙</span><div><strong>التشغيل والتواصل</strong><small>التسجيل وقنوات التواصل</small></div></button>
+        <button type="button" className={generalSection === 'fiscal' ? 'active' : ''} onClick={() => setGeneralSection('fiscal')}><span>◷</span><div><strong>السنة المالية</strong><small>الأرشفة والأرصدة</small></div></button>
+        <button type="button" className={generalSection === 'backup' ? 'active' : ''} onClick={() => setGeneralSection('backup')}><span>◫</span><div><strong>النسخ والأمان</strong><small>QR ونسخة البيانات</small></div></button>
+      </nav>
+      <div className="settings-general-pane">
+        {generalSection === 'profile' ? <Card className="stack settings-pane-card"><div className="settings-pane-title"><div><span className="settings-general-kicker">هوية الحساب</span><h3 className="h2">بيانات السنتر</h3><p>هذه البيانات التعريفية التي يعتمد عليها نظام السنتر والروابط الداخلية.</p></div><Badge tone="info">معرف موثوق</Badge></div><div className="settings-profile-grid"><div className="settings-profile-item"><span>اسم السنتر</span><strong>{center?.name ?? '—'}</strong></div><div className="settings-profile-item"><span>كود السنتر</span><strong dir="ltr">{center?.code ?? '—'}</strong></div><div className="settings-profile-item"><span>نوع الحساب</span><strong>{center?.kind === 'solo' ? 'مدرس مستقل' : 'سنتر تعليمي'}</strong></div><div className="settings-profile-item"><span>الحالة</span><strong>{center?.status === 'active' ? 'نشط' : center?.status ?? '—'}</strong></div></div><Notice tone="info">لتبقى الحسابات والطلاب معزولين بأمان، لا تُعدّل بيانات التعريف الأساسية من هذه الصفحة. استخدم قسم التواصل والتشغيل لتحديث ما يظهر للمستخدمين.</Notice></Card> : null}
+        {generalSection === 'operations' ? <Card className="settings-pane-card"><form className="stack" onSubmit={saveGeneral}><div className="settings-pane-title"><div><span className="settings-general-kicker">تشغيل يومي</span><h3 className="h2">التواصل وإتاحة التسجيل</h3><p>اضبط بيانات التواصل وحالة التسجيل والأرشيف بطريقة مباشرة ثم احفظ التغييرات.</p></div><Button type="submit" disabled={busy || !settingsDirty}>{busy ? 'جارٍ الحفظ…' : 'حفظ التغييرات'}</Button></div><div className="settings-form-grid"><Input label="واتساب السنتر" value={settings.whatsapp} onChange={(event) => { setSettings({ ...settings, whatsapp: event.target.value }); setSettingsDirty(true); }} dir="ltr" placeholder="2010…" help="رقم التواصل الذي يظهر للطلاب وأولياء الأمور." /><Input label="بريد التواصل" value={settings.contact_email} onChange={(event) => { setSettings({ ...settings, contact_email: event.target.value }); setSettingsDirty(true); }} dir="ltr" placeholder="center@example.com" help="قناة التواصل الرسمية للسنتر." /><Input label="اسم الأرشيف / السنة الدراسية" value={settings.archive_year} onChange={(event) => { setSettings({ ...settings, archive_year: event.target.value }); setSettingsDirty(true); }} placeholder="مثال: 2026 / 2027" /></div><div className="settings-switch-surface"><div><strong>إتاحة تسجيل الطلاب</strong><p>{settings.registration_open ? 'التسجيل متاح حالياً ويمكن للطلاب الجدد بدء الطلب.' : 'أُغلق التسجيل العام، وتبقى بيانات الطلاب الحاليين دون تغيير.'}</p></div><label className="switch-row"><input type="checkbox" checked={settings.registration_open} onChange={(event) => { setSettings({ ...settings, registration_open: event.target.checked }); setSettingsDirty(true); }} /><span>{settings.registration_open ? 'مفتوح' : 'مغلق'}</span></label></div><ErrorNotice error={error} /></form></Card> : null}
+        {generalSection === 'fiscal' ? <Card className="stack settings-pane-card"><div className="settings-pane-title"><div><span className="settings-general-kicker">تنظيم مالي</span><h3 className="h2">السنة المالية</h3><p>إغلاق السنة يرحّل الرصيد الافتتاحي والمستحقات إلى سنة جديدة مع الاحتفاظ بالسجل.</p></div>{years.some((year) => year.status === 'open') ? <Button type="button" variant="secondary" disabled={closing} onClick={() => void closeYear()}>{closing ? 'جارٍ الإغلاق…' : 'إغلاق السنة وفتح الجديدة'}</Button> : null}</div>{years.length === 0 ? <Notice tone="info">لا توجد سنوات مالية مسجلة — تُنشأ تلقائياً مع إنشاء السنتر.</Notice> : <div className="table-wrap"><table><thead><tr><th>السنة</th><th>تبدأ</th><th>تنتهي</th><th>الحالة</th><th>رصيد افتتاحي</th><th>رصيد الختام</th><th>مستحقات معلقة</th></tr></thead><tbody>{years.map((year) => <tr key={year.id}><td><strong>{year.year_label}</strong></td><td>{formatDate(year.starts_on)}</td><td>{year.ends_on ? formatDate(year.ends_on) : '—'}</td><td><Badge tone={year.status === 'open' ? 'success' : 'default'}>{year.status === 'open' ? 'مفتوحة' : 'مغلقة'}</Badge></td><td>{formatMoney(year.opening_balance)}</td><td>{year.closing_balance === null ? '—' : formatMoney(year.closing_balance)}</td><td>{year.closing_pending_dues === null ? '—' : formatMoney(year.closing_pending_dues)}</td></tr>)}</tbody></table></div>}</Card> : null}
+        {generalSection === 'backup' ? <Card className="settings-pane-card"><div className="settings-pane-title"><div><span className="settings-general-kicker">استمرارية وأمان</span><h3 className="h2">النسخ الاحتياطي ورمز السنتر</h3><p>احتفظ بنسخة قابلة للقراءة من البيانات، وشارك رمز السنتر الموثوق عند الحاجة.</p></div><Button type="button" variant="secondary" disabled={backupBusy || !center} onClick={() => void exportBackup()}>{backupBusy ? 'جارٍ تجهيز النسخة…' : 'تحميل نسخة احتياطية JSON'}</Button></div><div className="settings-backup-grid"><div className="settings-backup-copy"><h4>نسخة بيانات السنتر</h4><p>التصدير للقراءة فقط ومن جداول السنتر المعزولة بصلاحيات RLS. لا يغير أي سجل موجود.</p><Notice tone="info">احفظ الملف في مكان آمن ولا تشاركه إلا مع من يملك صلاحية الاطلاع على بيانات السنتر.</Notice></div>{qr ? <details className="settings-qr-card"><summary>عرض رمز QR وبيانات المشاركة</summary><div className="stack"><QrCode value={qr} /><textarea className="textarea" readOnly dir="ltr" value={qr} /></div></details> : null}</div></Card> : null}
+      </div>
+    </div>
+  </section>;
 
   const printing = <section className="printing-settings-workspace">
     <Card className="printing-settings-intro"><div><span className="printing-settings-kicker">هوية موحدة لكل المستندات</span><h2 className="h2">هوية الطباعة</h2><p>الشعار والعلامة المائية والتذييل هنا تطبق تلقائياً على الاختبارات، التقارير الأكاديمية، تقارير الطلاب، العهدة، كشوف الرواتب والوثائق المالية.</p></div><div className="row"><Button type="button" variant="secondary" onClick={() => setPrintPreviewOpen(true)}>⌕ معاينة قبل الحفظ</Button><Button type="button" disabled={busy || imageBusy || !settingsDirty} onClick={() => void savePrintIdentity()}>{busy ? 'جارٍ الحفظ…' : 'حفظ هوية الطباعة'}</Button></div></Card>
@@ -169,7 +170,6 @@ export default function AdminSettingsPage() {
     <nav className="settings-section-tabs" aria-label="أقسام إعدادات السنتر"><button type="button" className={tab === 'general' ? 'active' : ''} onClick={() => setTab('general')}>⚙ الإعدادات العامة</button><button type="button" className={tab === 'printing' ? 'active' : ''} onClick={() => setTab('printing')}>▧ هوية الطباعة</button></nav>
     {tab === 'general' ? general : printing}
 
-    <Modal open={settingsOpen} title="الإعدادات التشغيلية" subtitle="واتساب وبريد التواصل وأرشيف السنة وحالة التسجيل" dirty={settingsDirty} onClose={() => setSettingsOpen(false)} onSave={() => void saveGeneral({ preventDefault: () => {} } as React.FormEvent)} saveLabel={busy ? 'جاري الحفظ...' : 'حفظ الإعدادات'} footer={<Button disabled={busy} type="submit" form="settings-form">{busy ? 'جاري الحفظ...' : 'حفظ الإعدادات'}</Button>}><form id="settings-form" className="stack" onSubmit={saveGeneral}><Input label="واتساب السنتر" value={settings.whatsapp} onChange={(event) => { setSettings({ ...settings, whatsapp: event.target.value }); setSettingsDirty(true); }} dir="ltr" /><Input label="بريد التواصل" value={settings.contact_email} onChange={(event) => { setSettings({ ...settings, contact_email: event.target.value }); setSettingsDirty(true); }} dir="ltr" /><Input label="السنة/الأرشيف" value={settings.archive_year} onChange={(event) => { setSettings({ ...settings, archive_year: event.target.value }); setSettingsDirty(true); }} /><label className="row small muted"><input type="checkbox" checked={settings.registration_open} onChange={(event) => { setSettings({ ...settings, registration_open: event.target.checked }); setSettingsDirty(true); }} /> التسجيل مفتوح للطلاب</label><ErrorNotice error={error} /></form></Modal>
     <Modal open={printPreviewOpen} title="معاينة هوية الطباعة" subtitle="تظهر الهوية كما ستخرج في المستندات، ويمكنك العودة للتعديل دون حفظ." onClose={() => setPrintPreviewOpen(false)} wide footer={<div className="row"><Button type="button" variant="secondary" onClick={() => setPrintPreviewOpen(false)}>متابعة التعديل</Button><Button type="button" disabled={busy || imageBusy || !settingsDirty} onClick={() => void savePrintIdentity()}>{busy ? 'جارٍ الحفظ…' : 'حفظ الهوية'}</Button></div>}><PrintIdentityPreview branding={branding} /></Modal>
   </>;
 }
