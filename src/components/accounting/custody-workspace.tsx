@@ -23,6 +23,10 @@ export type Custody = {
   notes: string;
   submitted_at: string | null;
   created_at: string | null;
+  shortage_resolved_amount?: number | string;
+  shortage_resolution?: '' | 'expense' | 'deduction' | 'mixed';
+  shortage_resolution_note?: string;
+  shortage_resolved_at?: string | null;
 };
 
 const value = (amount: number | string | null | undefined) => Number(amount || 0);
@@ -51,6 +55,11 @@ export function CustodyWorkspace({ embedded = false }: { embedded?: boolean }) {
   const [settlementRow, setSettlementRow] = useState<Custody | null>(null);
   const [settlementAmount, setSettlementAmount] = useState('');
   const [settlementNotes, setSettlementNotes] = useState('');
+  const [shortageOpen, setShortageOpen] = useState(false);
+  const [shortageRow, setShortageRow] = useState<Custody | null>(null);
+  const [shortageMethod, setShortageMethod] = useState<'expense' | 'deduction'>('deduction');
+  const [shortageAmount, setShortageAmount] = useState('');
+  const [shortageNote, setShortageNote] = useState('');
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -118,6 +127,26 @@ export function CustodyWorkspace({ embedded = false }: { embedded?: boolean }) {
       await load();
     } catch (err) { setError(err); } finally { setBusy(false); }
   };
+  const openShortageResolution = (row: Custody) => {
+    const shortage = Math.max(0, value(row.expected_amount) - value(row.delivered_amount));
+    const remaining = Math.max(0, shortage - value(row.shortage_resolved_amount));
+    setShortageRow(row); setShortageMethod('deduction'); setShortageAmount(String(remaining)); setShortageNote('');
+    setDirty(false); setError(null); setShortageOpen(true);
+  };
+  const resolveShortage = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!shortageRow?.id) return;
+    const amountToResolve = Number(shortageAmount);
+    if (!Number.isFinite(amountToResolve) || amountToResolve <= 0) return setError(new Error('أدخل مبلغ تسوية صحيحاً.'));
+    setBusy(true); setError(null);
+    try {
+      const { error: rpcError } = await getSupabase().rpc('resolve_staff_custody_shortage', { p_custody: shortageRow.id, p_method: shortageMethod, p_amount: amountToResolve, p_note: shortageNote.trim() });
+      if (rpcError) throw rpcError;
+      setShortageOpen(false); setShortageRow(null); setDirty(false);
+      toast.success('تمت تسوية عجز العهدة', shortageMethod === 'expense' ? 'سُجل العجز مصروفاً تشغيلياً على السنتر.' : 'سُجل خصماً على صاحب العهدة وسيُقترح عند صرف راتبه.');
+      await load();
+    } catch (err) { setError(err); } finally { setBusy(false); }
+  };
   const printCustody = () => printReport(buildCustodyReportHtml('كشف العهدة والتحصيل', `${currentMonth} — حتى ${todayIso()}`, monthRows.map((row) => {
     const [label] = custodyLabel(row.status, value(row.delivered_amount));
     return [formatDate(row.custody_date), row.staff_name, formatMoney(value(row.expected_amount)), formatMoney(value(row.delivered_amount)), label, row.notes || '—'];
@@ -138,9 +167,17 @@ export function CustodyWorkspace({ embedded = false }: { embedded?: boolean }) {
     <Card className="stack">
       <div className="row-between"><div><h3 className="h3">سجل العهدة اليومي</h3><p className="tiny muted">المرحلة ١: التحصيل المتوقع · المرحلة ٢: تسليم النقدية · المرحلة ٣: المطابقة أو توثيق العجز/الزيادة.</p></div>{ownerReview ? <Button type="button" variant="ghost" onClick={() => void load()}>↻ تحديث</Button> : null}</div>
       {owner ? <Select label="عرض عهدة الموظف" value={filterStaff} onChange={(event) => setFilterStaff(event.target.value)}><option value="all">كل الموظفين</option>{staff.map((item) => <option key={item.id} value={item.id}>{item.full_name}</option>)}</Select> : null}
-      {visible.length === 0 ? <EmptyState title="لا يوجد تحصيل أو تسليم مسجل بعد" body="بمجرد تسجيل الموظف لتحصيل طالب، سيظهر هنا تلقائياً كمبلغ متوقع للعهدة." /> : <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>١. المتوقع من التحصيل</th><th>٢. المسلم للخزينة</th><th>٣. النتيجة</th><th>الفرق</th><th>ملاحظات</th>{ownerReview ? <th>الإجراء</th> : null}</tr></thead><tbody>{visible.map((row) => { const expected = value(row.expected_amount); const delivered = value(row.delivered_amount); const difference = delivered - expected; const [label, tone] = custodyLabel(row.status, delivered); return <tr key={`${row.staff_id}-${row.custody_date}`}><td>{formatDate(row.custody_date)}</td><td><strong>{row.staff_name}</strong></td><td>{formatMoney(expected)}</td><td>{row.submitted_at ? formatMoney(delivered) : <span className="muted">لم يُسلّم بعد</span>}</td><td><Badge tone={tone}>{label}</Badge></td><td style={{ color: difference === 0 ? 'var(--success)' : difference < 0 ? 'var(--danger)' : 'var(--warn)' }}>{row.submitted_at ? `${difference > 0 ? '+' : ''}${formatMoney(difference)}` : '—'}</td><td>{row.notes || '—'}</td>{ownerReview ? <td>{row.staff_id ? <Button type="button" variant={row.status === 'matched' ? 'ghost' : 'secondary'} onClick={() => openSettlement(row)}>{row.submitted_at ? 'مراجعة/تعديل' : 'تسجيل تسليم'}</Button> : <span className="tiny muted">قيد قديم غير منسوب</span>}</td> : null}</tr>; })}</tbody></table></div>}
+      {visible.length === 0 ? <EmptyState title="لا يوجد تحصيل أو تسليم مسجل بعد" body="بمجرد تسجيل الموظف لتحصيل طالب، سيظهر هنا تلقائياً كمبلغ متوقع للعهدة." /> : <div className="table-wrap"><table><thead><tr><th>التاريخ</th><th>الموظف</th><th>١. المتوقع</th><th>٢. المسلم</th><th>٣. النتيجة</th><th>الفرق</th><th>تسوية العجز</th><th>ملاحظات</th>{ownerReview ? <th>الإجراء</th> : null}</tr></thead><tbody>{visible.map((row) => {
+        const expected = value(row.expected_amount); const delivered = value(row.delivered_amount); const difference = delivered - expected;
+        const shortage = Math.max(0, expected - delivered); const resolved = Math.min(shortage, value(row.shortage_resolved_amount)); const remainingShortage = Math.max(0, shortage - resolved);
+        const [label, tone] = custodyLabel(row.status, delivered);
+        const resolutionLabel = row.shortage_resolution === 'expense' ? 'مصروف على السنتر' : row.shortage_resolution === 'deduction' ? 'خصم على الموظف' : row.shortage_resolution === 'mixed' ? 'مصروف وخصم' : '';
+        return <tr key={`${row.staff_id}-${row.custody_date}`}><td>{formatDate(row.custody_date)}</td><td><strong>{row.staff_name}</strong></td><td>{formatMoney(expected)}</td><td>{row.submitted_at ? formatMoney(delivered) : <span className="muted">لم يُسلّم بعد</span>}</td><td><Badge tone={tone}>{label}</Badge></td><td style={{ color: difference === 0 ? 'var(--success)' : difference < 0 ? 'var(--danger)' : 'var(--warn)' }}>{row.submitted_at ? `${difference > 0 ? '+' : ''}${formatMoney(difference)}` : '—'}</td><td>{shortage > 0 ? <div className="custody-resolution-cell"><strong style={{ color: remainingShortage ? 'var(--danger)' : 'var(--success)' }}>{remainingShortage ? `متبقٍ ${formatMoney(remainingShortage)}` : 'تمت التسوية'}</strong>{resolved > 0 ? <small>{resolutionLabel} · سُوّي {formatMoney(resolved)}</small> : <small>لم يُسوَّ بعد</small>}</div> : '—'}</td><td>{row.notes || '—'}</td>{ownerReview ? <td>{row.staff_id ? <div className="row custody-actions"><Button type="button" variant={row.status === 'matched' ? 'ghost' : 'secondary'} onClick={() => openSettlement(row)}>{row.submitted_at ? 'مراجعة' : 'تسجيل تسليم'}</Button>{row.status === 'shortage' && remainingShortage > 0 && row.id ? <Button type="button" variant="secondary" onClick={() => openShortageResolution(row)}>تسوية العجز</Button> : null}</div> : <span className="tiny muted">قيد قديم غير منسوب</span>}</td> : null}</tr>;
+      })}</tbody></table></div>}
+
     </Card>
     <Modal open={deliveryOpen} title="تسليم عهدة اليوم" subtitle={`التحصيل المتوقع المسجل: ${formatMoney(value(myToday?.expected_amount))}`} dirty={dirty} onClose={() => setDeliveryOpen(false)} onSave={() => void submitCustody({ preventDefault: () => undefined } as React.FormEvent)} saveLabel={busy ? 'جارٍ الحفظ…' : 'تسجيل التسليم'} footer={<Button disabled={busy} type="submit" form="custody-form">{busy ? 'جارٍ الحفظ…' : 'تسجيل التسليم'}</Button>}><form id="custody-form" className="stack" onSubmit={submitCustody}><Input label="المبلغ المُسلّم للخزينة" type="number" min="0" step="0.01" value={amount} onChange={(event) => { setAmount(event.target.value); setDirty(true); }} /><Textarea label="ملاحظات التسليم (اختيارية)" value={notes} onChange={(event) => { setNotes(event.target.value); setDirty(true); }} /><Notice tone="info">يحسب النظام التحصيل من الدفعات التي سجلتها باسمك اليوم، ثم يبين المطابقة أو العجز أو الزيادة تلقائياً.</Notice><ErrorNotice error={error} /></form></Modal>
     <Modal open={settlementOpen} title="مراجعة وتسوية العهدة" subtitle={settlementRow ? `${settlementRow.staff_name} — ${formatDate(settlementRow.custody_date)} — المتوقع ${formatMoney(value(settlementRow.expected_amount))}` : ''} dirty={dirty} onClose={() => setSettlementOpen(false)} onSave={() => void settle({ preventDefault: () => undefined } as React.FormEvent)} saveLabel={busy ? 'جارٍ الاعتماد…' : 'اعتماد التسليم'} footer={<Button disabled={busy} type="submit" form="custody-settlement-form">{busy ? 'جارٍ الاعتماد…' : 'اعتماد التسليم'}</Button>}><form id="custody-settlement-form" className="stack" onSubmit={settle}><Input label="المبلغ الفعلي الذي استلمته الخزينة" type="number" min="0" step="0.01" value={settlementAmount} onChange={(event) => { setSettlementAmount(event.target.value); setDirty(true); }} /><Textarea label="ملاحظة المراجعة أو سبب الفرق" value={settlementNotes} onChange={(event) => { setSettlementNotes(event.target.value); setDirty(true); }} /><Notice tone="warn">يعتمد النظام الحالة تلقائياً: مطابق عند تساوي المبلغين، عجز عند الأقل، وزيادة عند الأعلى. تستطيع العودة لهذا السجل وتعديله مع توثيق السبب.</Notice><ErrorNotice error={error} /></form></Modal>
+    <Modal open={shortageOpen} title="تسوية عجز العهدة" subtitle={shortageRow ? `${shortageRow.staff_name} — عجز ${formatMoney(Math.max(0, value(shortageRow.expected_amount) - value(shortageRow.delivered_amount)))}` : ''} dirty={dirty} onClose={() => setShortageOpen(false)} onSave={() => void resolveShortage({ preventDefault: () => undefined } as React.FormEvent)} saveLabel={busy ? 'جارٍ التسوية…' : 'اعتماد التسوية'} footer={<Button disabled={busy} type="submit" form="custody-shortage-form">{busy ? 'جارٍ التسوية…' : 'اعتماد التسوية'}</Button>}><form id="custody-shortage-form" className="stack" onSubmit={resolveShortage}><div className="notice info">اختر معالجة واحدة واضحة للعجز. لن يسجل النظام المبلغ مرتين؛ إما تكلفة على السنتر أو ذمة/خصم على صاحب العهدة.</div><Select label="طريقة التسوية" value={shortageMethod} onChange={(event) => { setShortageMethod(event.target.value as 'expense' | 'deduction'); setDirty(true); }}><option value="deduction">خصم على صاحب العهدة</option><option value="expense">مصروف يتحمله السنتر</option></Select><Input label="مبلغ التسوية" type="number" min="0.01" step="0.01" value={shortageAmount} onChange={(event) => { setShortageAmount(event.target.value); setDirty(true); }} help={shortageRow ? `المتبقي غير المسوّى: ${formatMoney(Math.max(0, value(shortageRow.expected_amount) - value(shortageRow.delivered_amount) - value(shortageRow.shortage_resolved_amount)))}` : undefined} /><Textarea label="سبب أو ملاحظة (اختياري)" value={shortageNote} onChange={(event) => { setShortageNote(event.target.value); setDirty(true); }} />{shortageMethod === 'expense' ? <Notice tone="warn">سيسجل كمصروف تشغيلي تحت «تسوية عجز عهدة» ويظهر في قائمة الدخل.</Notice> : <Notice tone="info">سيسجل خصماً مفتوحاً على {shortageRow?.staff_name || 'صاحب العهدة'} ويُقترح لاحقاً عند صرف راتبه، دون خروج نقدي جديد.</Notice>}<ErrorNotice error={error} /></form></Modal>
   </>;
 }

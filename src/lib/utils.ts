@@ -401,6 +401,16 @@ export function arabicError(err: unknown): string {
   if (msg.includes('accounting_not_enabled')) return 'خدمة المحاسبة غير مفعلة لسنترك حالياً';
   if (msg.includes('invalid_employee')) return 'الموظف المختار غير نشط أو لا يخص هذا السنتر';
   if (msg.includes('invalid_advance_amount')) return 'أدخل مبلغ سلفة صحيحاً أكبر من صفر';
+  if (msg.includes('student_device_blocked')) return 'هذا الجهاز محجوب لهذا الطالب من إدارة السنتر';
+  if (msg.includes('student_device_not_found')) return 'لم يعد هذا الجهاز مسجلاً لهذا الطالب';
+  if (msg.includes('invalid_device')) return 'معرّف الجهاز غير صالح';
+  if (msg.includes('custody_has_no_shortage')) return 'لا يوجد عجز في هذه العهدة لتسويته';
+  if (msg.includes('invalid_custody_resolution_amount')) return 'أدخل مبلغاً صحيحاً لا يتجاوز العجز غير المسوّى';
+  if (msg.includes('ledger_source_managed')) return 'هذا القيد مرتبط بإيصال تحصيل الطالب؛ عدّل العملية من قسم التحصيل حتى لا تختلف السجلات';
+  if (msg.includes('salary_amount_requires_reversal')) return 'لا يمكن تغيير مبلغ راتب صُرف من الدفتر لأنه مرتبط بسلف وخصومات؛ سجل تصحيحاً/عكساً موثقاً';
+  if (msg.includes('advance_edit_below_applied')) return 'لا يمكن تخفيض السلفة عن الجزء الذي خُصم فعلاً من رواتب سابقة';
+  if (msg.includes('invalid_staff_deduction_edit')) return 'لا يمكن تخفيض الخصم عن الجزء الذي عولج بالفعل؛ تحقق من المبلغ والسبب والتاريخ';
+  if (msg.includes('custody_resolution_exceeds_shortage')) return 'لا يمكن خفض مبلغ التسليم بعد تسوية جزء من العجز';
   if (msg.includes('invalid_salary_amount')) return 'أدخل راتباً أساسياً صحيحاً أكبر من صفر';
   if (msg.includes('invalid_commission_amount')) return 'أدخل مبلغ عمولة صحيحاً أكبر من صفر';
   if (msg.includes('invalid_ledger_entry') || msg.includes('invalid_ledger_kind')) return 'تحقق من نوع الحركة وتصنيفها ومبلغها';

@@ -1308,6 +1308,18 @@ export async function fetchSurveyResponses(surveyId: string): Promise<AppSurveyR
   return (data ?? []) as AppSurveyResponse[];
 }
 
+/** أعداد الردود لكل استبيان، لتظهر حالة المشاركة في القائمة دون فتح كل استبيان. */
+export async function fetchSurveyResponseCounts(centerId: string): Promise<Record<string, number>> {
+  const { data, error } = await getSupabase().from('app_survey_responses').select('survey_id')
+    .eq('center_id', centerId).limit(5000);
+  if (error) throw error;
+  return (data ?? []).reduce<Record<string, number>>((counts, row) => {
+    const id = String((row as { survey_id?: string }).survey_id ?? '');
+    if (id) counts[id] = (counts[id] ?? 0) + 1;
+    return counts;
+  }, {});
+}
+
 export async function fetchMySurveyResponses(studentId: string): Promise<AppSurveyResponse[]> {
   const { data, error } = await getSupabase().from('app_survey_responses').select('*')
     .eq('student_id', studentId).limit(200);

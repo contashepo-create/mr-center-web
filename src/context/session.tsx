@@ -4,7 +4,7 @@ import type { Session } from '@supabase/supabase-js';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { getSupabase, initSupabase, isSupabaseReady } from '@/lib/supabase';
 import { fetchMyFeatures, type MyFeatures } from '@/lib/features';
-import { claimMySession, isMySessionCurrent } from '@/lib/sessionGuard';
+import { claimMySession, isMySessionCurrent, registerMyStudentDevice } from '@/lib/sessionGuard';
 import { clearLocalAccessSession, refreshAccessToken } from '@/lib/auth/clientSession';
 import { ACCESS_REFRESH_MARGIN_MS } from '@/lib/auth/constants';
 import type { MySubscription, Profile, Role } from '@/lib/types';
@@ -49,6 +49,9 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         .maybeSingle();
       if (error) throw error;
       setProfile((prof as Profile) ?? null);
+      // الجلسة المستعادة لا تمر دائماً بحدث SIGNED_IN؛ سجّل جهاز الطالب
+      // دون إعادة مطالبة الجلسة حتى لا تستحوذ جلسة قديمة على جلسة أحدث.
+      if (prof?.role === 'student') void registerMyStudentDevice();
 
       if (prof) {
         const [sub, feat] = await Promise.all([

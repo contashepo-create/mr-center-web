@@ -6,6 +6,7 @@
 // ============================================================
 
 import { getSupabase } from './supabase';
+import { getDeviceId } from './visitors';
 
 const KEY = 'mrcenter.web.session.key';
 
@@ -24,6 +25,16 @@ function writeKey(key: string): void {
   try { window.localStorage.setItem(KEY, key); } catch { /* ignore */ }
 }
 
+/** يسجل متصفح الطالب في سجل جهاز سنتره فقط، بلا تأثير على حجب الزوار العام. */
+export async function registerMyStudentDevice(): Promise<void> {
+  try {
+    const device = getDeviceId();
+    if (device) await getSupabase().rpc('register_current_student_device', { p_device: device });
+  } catch {
+    // توافق آمن مع قواعد بيانات لم يطبّق عليها الترحيل بعد أو اتصال مؤقت.
+  }
+}
+
 /**
  * يُستدعى بعد تسجيل الدخول مباشرة:
  * يبطل أي جلسة أخرى لنفس الحساب (يبقى هذا الجهاز فقط) ثم يسجل جلسة جديدة.
@@ -39,6 +50,7 @@ export async function claimMySession(): Promise<void> {
       writeKey(key);
     }
     await sb.rpc('claim_session', { p_key: key });
+    await registerMyStudentDevice();
   } catch {
     // لا نمنع الدخول إن لم يُطبَّق الترحيل بعد أو فشل الاتصال مؤقتاً
   }
@@ -51,10 +63,19 @@ export async function claimMySession(): Promise<void> {
 export async function isMySessionCurrent(): Promise<boolean> {
   try {
     const key = readKey();
-    if (!key) return true; // لا مفتاح مسجل — لا نفرض حجباً
-    const { data, error } = await getSupabase().rpc('check_session', { p_key: key });
-    if (error) return true;
-    return data !== false;
+    const sb = getSupabase();
+    if (key) {
+      const { data, error } = await sb.rpc('check_session', { p_key: key });
+      if (error || data === false) return error ? true : false;
+    }
+    // فحص إضافي لحجب جهاز الطالب المسجل لهذا السنتر فقط. إن لم يطبّق
+    // الترحيل بعد نتجاهل الخطأ كي لا نحجب مستخدماً بلا داعٍ.
+    const device = getDeviceId();
+    if (device) {
+      const access = await sb.rpc('check_current_student_device', { p_device: device });
+      if (!access.error && access.data === false) return false;
+    }
+    return true;
   } catch {
     return true;
   }
