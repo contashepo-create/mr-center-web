@@ -6,7 +6,8 @@ import { Modal } from '@/components/modal';
 import { useToast } from '@/components/toast';
 import { useSession } from '@/context/session';
 import { ExamPaper, ElectronicExamView } from '@/components/exam/paper';
-import { StampEditor } from '@/components/exam/ornaments';
+import { ExamQuestionInput, UnderlinedQuestionText, isExamQuestionAnswered } from '@/components/exam/interactive-input';
+import { QuestionImage, StampEditor } from '@/components/exam/ornaments';
 import { answerLabel, correctLabel } from '@/components/exam/review';
 import { ALL_ORNAMENTS, ornamentsForSubject, subjectLabelFor } from '@/lib/exam-ornaments';
 import { EGYPT_TYPES, egyptMeta } from '@/lib/exam-egyptian';
@@ -26,12 +27,17 @@ function defaultOrnaments(subject: string): ExamOrnaments {
   };
 }
 
-function newQuestion(type: ExamQuestionType = 'mcq'): ExamQuestion {
-  if (type === 'tf') return { type, q: '', choices: ['صح', 'خطأ'], marks: 1 };
-  if (type === 'match') return { type, q: '', choices: [], pairs: [{ l: '', r: '' }, { l: '', r: '' }], marks: 2 };
-  if (type === 'essay' || type === 'short') return { type, q: '', choices: [], marks: 3 };
-  if (type === 'complete' || type === 'correct') return { type, q: '', choices: [], answer: '', marks: 2 };
-  return { type, q: '', choices: ['', '', '', ''], marks: 2 };
+function newSectionId(): string { return `section-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`; }
+
+/** السؤال المخزن هو سؤال فرعي فعلي؛ sectionId يجمعه تحت رأس واحد كما في Center Publish. */
+function newQuestion(type: ExamQuestionType = 'mcq', sectionId = newSectionId()): ExamQuestion {
+  const base = { type, q: '', choices: [], marks: 1, sectionId };
+  if (type === 'tf') return { ...base, choices: ['صح', 'خطأ'] };
+  if (type === 'match') return { ...base, pairs: [{ l: '', r: '' }, { l: '', r: '' }] };
+  if (type === 'essay' || type === 'short') return base;
+  if (type === 'complete') return { ...base, answer: '' };
+  if (type === 'correct') return { ...base, answer: '', underlined: { start: 0, count: 0 } };
+  return { ...base, choices: ['', '', '', ''] };
 }
 
 function defaultAnswer(q: ExamQuestion): ExamAnswer {
@@ -43,8 +49,8 @@ function defaultAnswer(q: ExamQuestion): ExamAnswer {
 }
 
 function normalizeQuestions(questions: ExamQuestion[]): ExamQuestion[] {
-  return questions.map((q) => {
-    const base = { ...newQuestion(q.type), ...q, choices: q.choices ?? [] };
+  return questions.map((q, index) => {
+    const base = { ...newQuestion(q.type, q.sectionId || `legacy-${index}`), ...q, choices: q.choices ?? [] };
     if ((base.type === 'mcq' || base.type === 'multi') && base.choices.length < 4) base.choices = [...base.choices, '', '', '', ''].slice(0, 4);
     if (base.type === 'tf') base.choices = ['صح', 'خطأ'];
     if (base.type === 'match' && (!base.pairs || base.pairs.length < 2)) base.pairs = [{ l: '', r: '' }, { l: '', r: '' }];
@@ -78,126 +84,74 @@ function suggestGrade(q: ExamQuestion, key: ExamAnswer | undefined, given: ExamA
   return { correct: null, earned: 0 };
 }
 
-function QuestionEditor({ q, answer, index, onQuestion, onAnswer, onDelete, onMove }: {
+function QuestionEditor({ q, answer, mainNumber, subNumber, onQuestion, onAnswer, onDelete, onMove }: {
   q: ExamQuestion;
   answer: ExamAnswer;
-  index: number;
+  mainNumber: number;
+  subNumber: number;
   onQuestion: (q: ExamQuestion) => void;
   onAnswer: (a: ExamAnswer) => void;
   onDelete: () => void;
   onMove: (delta: number) => void;
 }) {
-  const [expanded, setExpanded] = useState(index === 0);
+  const [expanded, setExpanded] = useState(subNumber === 1);
   const meta = egyptMeta(q.type);
-  const setType = (type: ExamQuestionType) => {
-    const nq = newQuestion(type);
-    onQuestion(nq);
-    onAnswer(defaultAnswer(nq));
-  };
-  const setChoice = (idx: number, value: string) => onQuestion({ ...q, choices: q.choices.map((c, i) => i === idx ? value : c) });
-  const toggleMulti = (idx: number, checked: boolean) => {
-    const arr = Array.isArray(answer) ? answer as number[] : [];
-    onAnswer(checked ? [...arr, idx].sort() : arr.filter((x) => x !== idx));
+  const setChoice = (choiceIndex: number, choice: string) => onQuestion({ ...q, choices: q.choices.map((item, index) => index === choiceIndex ? choice : item) });
+  const toggleMulti = (choiceIndex: number, checked: boolean) => {
+    const selected = Array.isArray(answer) ? answer as number[] : [];
+    onAnswer(checked ? [...selected, choiceIndex].sort() : selected.filter((item) => item !== choiceIndex));
   };
   const pairs = q.pairs ?? [];
+  const correctionWords = q.type === 'correct' ? q.q.trim().split(/\s+/).filter(Boolean) : [];
+  const selectedRange = q.underlined ?? { start: 0, count: 0 };
+  const toggleUnderlinedWord = (wordIndex: number) => {
+    const start = Math.max(0, selectedRange.start - 1);
+    const count = selectedRange.count || 0;
+    if (!count) { onQuestion({ ...q, underlined: { start: wordIndex + 1, count: 1 } }); return; }
+    if (wordIndex >= start && wordIndex < start + count) {
+      if (count === 1) onQuestion({ ...q, underlined: { start: 0, count: 0 } });
+      else if (wordIndex === start) onQuestion({ ...q, underlined: { start: start + 2, count: count - 1 } });
+      else if (wordIndex === start + count - 1) onQuestion({ ...q, underlined: { start: start + 1, count: count - 1 } });
+      else onQuestion({ ...q, underlined: { start: wordIndex + 1, count: 1 } });
+      return;
+    }
+    const nextStart = Math.min(start, wordIndex);
+    const nextEnd = Math.max(start + count - 1, wordIndex);
+    onQuestion({ ...q, underlined: { start: nextStart + 1, count: nextEnd - nextStart + 1 } });
+  };
 
-  return <div className="card compact soft stack">
-    <div className="row-between">
-      <h3 className="h3" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span className="exam-paper-sec-mark">{meta.paperMark}</span>
-        سؤال {index + 1}
-        <Badge tone="info">{meta.label}</Badge>
-      </h3>
-      <div className="row">
-        <Button type="button" variant="ghost" onClick={() => setExpanded((value) => !value)}>{expanded ? 'طي' : 'فتح'}</Button>
-        <Button type="button" variant="secondary" onClick={() => onMove(-1)} title="تحريك لأعلى">↑</Button>
-        <Button type="button" variant="secondary" onClick={() => onMove(1)} title="تحريك لأسفل">↓</Button>
-        <Button type="button" variant="danger" onClick={onDelete}>حذف</Button>
-      </div>
-    </div>
+  return <article className="exam-subquestion-card">
+    <div className="exam-subquestion-head"><div className="row"><span className="subquestion-number">{mainNumber}.{subNumber}</span><strong>السؤال الفرعي {subNumber}</strong><span className="tiny muted">{meta.label}</span></div><div className="row"><Button type="button" variant="ghost" onClick={() => setExpanded((value) => !value)}>{expanded ? 'طي' : 'تعديل'}</Button><Button type="button" variant="secondary" onClick={() => onMove(-1)} title="تحريك لأعلى">↑</Button><Button type="button" variant="secondary" onClick={() => onMove(1)} title="تحريك لأسفل">↓</Button><Button type="button" variant="danger" onClick={onDelete}>حذف</Button></div></div>
+    {!expanded ? <div className="exam-question-summary"><span><UnderlinedQuestionText question={q} /></span><span>{q.marks} درجة</span></div> : <div className="exam-question-body stack">
+      <div className="grid grid-2"><Input label="الدرجة" type="number" min={1} value={q.marks} onChange={(event) => onQuestion({ ...q, marks: Number(event.target.value) || 1 })} help="الافتراضي درجة واحدة لكل سؤال فرعي." /><div className="input-wrap"><span className="label">التصحيح</span><div className={`notice ${meta.manual ? 'warn' : 'success'}`} style={{ padding: '9px 11px' }}>{meta.manual ? 'يدوي بعد التسليم' : 'تلقائي'}</div></div></div>
+      {q.type === 'correct' ? <div className="stack"><Input label="نص الجملة" value={q.q} onChange={(event) => onQuestion({ ...q, q: event.target.value, underlined: { start: 0, count: 0 } })} placeholder="اكتب الجملة، ثم اختر الكلمة التي تحتها خط" required />{correctionWords.length ? <div className="underline-picker"><div className="row-between"><strong>اضغط الكلمة أو الكلمات التي تريد وضع خط تحتها</strong>{selectedRange.count ? <Button type="button" variant="ghost" onClick={() => onQuestion({ ...q, underlined: { start: 0, count: 0 } })}>إلغاء التحديد</Button> : null}</div><div className="underline-words">{correctionWords.map((word, wordIndex) => { const active = selectedRange.count > 0 && wordIndex >= selectedRange.start - 1 && wordIndex < selectedRange.start - 1 + selectedRange.count; return <button type="button" key={`${word}-${wordIndex}`} className={active ? 'active' : ''} onClick={() => toggleUnderlinedWord(wordIndex)}>{word}</button>; })}</div>{selectedRange.count ? <div className="tiny"><span className="muted">سيظهر تحت خط للطالب:</span> <strong><UnderlinedQuestionText question={q} /></strong></div> : <p className="tiny muted">اختر كلمة واحدة على الأقل حتى يظهر سؤال التصويب بالشكل الصحيح في الورقة والاختبار الإلكتروني.</p>}</div> : null}<Input label="التصويب النموذجي" value={typeof answer === 'string' ? answer : ''} onChange={(event) => { onAnswer(event.target.value); onQuestion({ ...q, answer: event.target.value }); }} placeholder="الكلمة أو العبارة الصحيحة" /></div> : <Textarea label="نص السؤال" value={q.q} onChange={(event) => onQuestion({ ...q, q: event.target.value })} required />}
+      {q.type === 'mcq' || q.type === 'multi' ? <div className="grid grid-2">{q.choices.slice(0, 4).map((choice, choiceIndex) => <div key={choiceIndex} className="row" style={{ alignItems: 'end' }}><div style={{ flex: 1 }}><Input label={`الاختيار (${['أ', 'ب', 'ج', 'د'][choiceIndex]})`} value={choice} onChange={(event) => setChoice(choiceIndex, event.target.value)} /></div><label className="row tiny muted" style={{ gap: 5, paddingBottom: 12 }} title="حدد الإجابة الصحيحة"><input type={q.type === 'mcq' ? 'radio' : 'checkbox'} name={`correct-${q.sectionId}-${subNumber}`} checked={q.type === 'mcq' ? answer === choiceIndex : Array.isArray(answer) && (answer as number[]).includes(choiceIndex)} onChange={(event) => q.type === 'mcq' ? onAnswer(choiceIndex) : toggleMulti(choiceIndex, event.target.checked)} />صحيح</label></div>)}</div> : null}
+      {q.type === 'tf' ? <div className="tabs"><button type="button" className={`tab ${answer === 0 ? 'active' : ''}`} onClick={() => onAnswer(0)}>✓ صح</button><button type="button" className={`tab ${answer === 1 ? 'active' : ''}`} onClick={() => onAnswer(1)}>✗ خطأ</button></div> : null}
+      {q.type === 'complete' ? <Input label="الإجابة النموذجية (للمطابقة الآلية)" value={typeof answer === 'string' ? answer : ''} onChange={(event) => { onAnswer(event.target.value); onQuestion({ ...q, answer: event.target.value }); }} /> : null}
+      {q.type === 'match' ? <div className="stack"><div className="row-between"><div><strong>أزواج التوصيل</strong><p className="tiny muted">كل صف هو زوج صحيح؛ ستظهر بطاقات العمود (ب) بترتيب مختلف للطالب ليختارها تفاعلياً.</p></div><Button type="button" variant="secondary" onClick={() => { const next = [...pairs, { l: '', r: '' }]; onQuestion({ ...q, pairs: next }); onAnswer(next.map((_, index) => index)); }}>إضافة زوج</Button></div>{pairs.map((pair, pairIndex) => <div className="grid grid-2" key={pairIndex}><Input label={`العمود (أ) — ${pairIndex + 1}`} value={pair.l} onChange={(event) => onQuestion({ ...q, pairs: pairs.map((item, index) => index === pairIndex ? { ...item, l: event.target.value } : item) })} /><div className="row" style={{ alignItems: 'end' }}><div style={{ flex: 1 }}><Input label={`العمود (ب) المطابق — ${pairIndex + 1}`} value={pair.r} onChange={(event) => onQuestion({ ...q, pairs: pairs.map((item, index) => index === pairIndex ? { ...item, r: event.target.value } : item) })} /></div>{pairs.length > 2 ? <Button type="button" variant="ghost" onClick={() => { const next = pairs.filter((_, index) => index !== pairIndex); onQuestion({ ...q, pairs: next }); onAnswer(next.map((_, index) => index)); }}>حذف</Button> : null}</div></div>)}</div> : null}
+      <details><summary className="small muted" style={{ cursor: 'pointer' }}>🖼 صورة السؤال (اختيارية) {q.image ? '— مضافة' : ''}</summary><div className="grid grid-2" style={{ marginTop: 8 }}><Input label="رابط الصورة" value={q.image ?? ''} onChange={(event) => onQuestion({ ...q, image: event.target.value || null })} placeholder="https://… أو رابط من التخزين" /><Select label="مكان الصورة" value={q.imagePosition ?? 'beside'} onChange={(event) => onQuestion({ ...q, imagePosition: event.target.value as ExamQuestion['imagePosition'] })}><option value="beside">بجانب السؤال (ورقي)</option><option value="above">فوق السؤال</option><option value="below">تحت السؤال</option></Select></div>{q.image ? <div className="row" style={{ alignItems: 'center', marginTop: 8 }}><img src={q.image} alt="معاينة" style={{ maxHeight: 90, maxWidth: 220, borderRadius: 8, border: '1px solid var(--border)' }} onError={(event) => { (event.target as HTMLImageElement).style.display = 'none'; }} /><span className="tiny muted">تظهر الصورة وفق الموضع المحدد.</span></div> : null}</details>
+    </div>}
+  </article>;
+}
 
-    {!expanded ? <div className="exam-question-summary"><span>{q.q || 'اكتب نص السؤال…'}</span><span>{q.marks} درجة · {meta.manual ? 'تصحيح يدوي' : 'تصحيح تلقائي'}</span></div> : null}
-    {expanded ? <div className="exam-question-body stack">
-    <div className="grid grid-3">
-      <Select label="نوع السؤال" value={q.type} onChange={(e) => setType(e.target.value as ExamQuestionType)}>
-        {EGYPT_TYPES.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
-      </Select>
-      <Input label="الدرجة" type="number" min={1} value={q.marks} onChange={(e) => onQuestion({ ...q, marks: Number(e.target.value) || 1 })} />
-      <div className="input-wrap"><span className="label">التصحيح</span><div className={`notice ${meta.manual ? 'warn' : 'success'}`} style={{ padding: '9px 11px' }}>{meta.manual ? 'يدوي (مراجعة المعلم)' : 'تلقائي'}</div></div>
-    </div>
-
-    <Textarea label="نص السؤال" value={q.q} onChange={(e) => onQuestion({ ...q, q: e.target.value })} required />
-
-    {q.type === 'mcq' || q.type === 'multi' ? (
-      <div className="grid grid-2">
-        {q.choices.slice(0, 4).map((c, i) => (
-          <div key={i} className="row" style={{ alignItems: 'end' }}>
-            <div style={{ flex: 1 }}><Input label={`الاختيار (${['أ', 'ب', 'ج', 'د'][i]})`} value={c} onChange={(e) => setChoice(i, e.target.value)} /></div>
-            <label className="row tiny muted" style={{ gap: 5, paddingBottom: 12 }} title="حدد الإجابة الصحيحة">
-              <input type={q.type === 'mcq' ? 'radio' : 'checkbox'} name={`correct-${index}`} checked={q.type === 'mcq' ? answer === i : Array.isArray(answer) && (answer as number[]).includes(i)} onChange={(e) => q.type === 'mcq' ? onAnswer(i) : toggleMulti(i, e.target.checked)} />
-              صحيح
-            </label>
-          </div>
-        ))}
-        <Notice tone="info">{q.type === 'mcq' ? 'حدد اختياراً واحداً صحيحاً' : 'حدد كل الاختيارات الصحيحة'}</Notice>
-      </div>
-    ) : null}
-
-    {q.type === 'tf' ? (
-      <div className="tabs">
-        <button type="button" className={`tab ${answer === 0 ? 'active' : ''}`} onClick={() => onAnswer(0)}>✓ صح</button>
-        <button type="button" className={`tab ${answer === 1 ? 'active' : ''}`} onClick={() => onAnswer(1)}>✗ خطأ</button>
-      </div>
-    ) : null}
-
-    {q.type === 'complete' ? (
-      <Input label="الإجابة النموذجية (للمطابقة الآلية)" value={typeof answer === 'string' ? answer : ''} onChange={(e) => { onAnswer(e.target.value); onQuestion({ ...q, answer: e.target.value }); }} />
-    ) : null}
-
-    {q.type === 'correct' ? (
-      <Input label="الإجابة النموذجية (اختياري — تُعتمد آلياً عند التطابق التام)" value={typeof answer === 'string' ? answer : ''} onChange={(e) => { onAnswer(e.target.value); onQuestion({ ...q, answer: e.target.value }); }} />
-    ) : null}
-
-    {q.type === 'match' ? (
-      <div className="stack">
-        <div className="row-between">
-          <strong>أزواج التوصيل (العمود أ ↔ العمود ب)</strong>
-          <Button type="button" variant="secondary" onClick={() => { const next = [...pairs, { l: '', r: '' }]; onQuestion({ ...q, pairs: next }); onAnswer(next.map((_, i) => i)); }}>إضافة زوج</Button>
-        </div>
-        {pairs.map((p, i) => (
-          <div key={i} className="grid grid-2">
-            <Input label={`العمود أ ${i + 1}`} value={p.l} onChange={(e) => onQuestion({ ...q, pairs: pairs.map((x, idx) => idx === i ? { ...x, l: e.target.value } : x) })} />
-            <Input label={`العمود ب ${i + 1}`} value={p.r} onChange={(e) => onQuestion({ ...q, pairs: pairs.map((x, idx) => idx === i ? { ...x, r: e.target.value } : x) })} />
-          </div>
-        ))}
-        <div className="notice">حدد لكل بند في العمود (أ) البند المطابق من العمود (ب):</div>
-        {pairs.map((p, i) => (
-          <div key={`m-${i}`} className="row-between card compact soft">
-            <span>{(p.l || `أ ${i + 1}`)} ⟶</span>
-            <select className="select" style={{ width: '60%' }} value={Array.isArray(answer) ? answer[i] ?? i : i} onChange={(e) => { const arr = Array.isArray(answer) ? [...answer] : pairs.map((_, idx) => idx); arr[i] = Number(e.target.value); onAnswer(arr); }}>
-              {pairs.map((x, idx) => <option key={idx} value={idx}>{x.r || `ب ${idx + 1}`}</option>)}
-            </select>
-          </div>
-        ))}
-      </div>
-    ) : null}
-
-    {/* صورة السؤال */}
-    <details>
-      <summary className="small muted" style={{ cursor: 'pointer' }}>🖼 صورة السؤال (اختيارية) {q.image ? '— مضافة' : ''}</summary>
-      <div className="grid grid-2" style={{ marginTop: 8 }}>
-        <Input label="رابط الصورة" value={q.image ?? ''} onChange={(e) => onQuestion({ ...q, image: e.target.value || null })} placeholder="https://… أو رابط من التخزين" />
-        <Select label="مكان الصورة" value={q.imagePosition ?? 'beside'} onChange={(e) => onQuestion({ ...q, imagePosition: e.target.value as ExamQuestion['imagePosition'] })}>
-          <option value="beside">بجانب السؤال (ورقي)</option>
-          <option value="above">فوق السؤال</option>
-          <option value="below">تحت السؤال</option>
-        </Select>
-        <div className="input-wrap"><span className="label">حجم الصورة (px)</span><input className="input" type="number" min={80} max={600} value={q.imageSize ?? 160} onChange={(e) => onQuestion({ ...q, imageSize: Number(e.target.value) || 160 })} /></div>
-      </div>
-      {q.image ? <div className="row" style={{ alignItems: 'center', marginTop: 8 }}><img src={q.image} alt="معاينة" style={{ maxHeight: 90, maxWidth: 220, borderRadius: 8, border: '1px solid var(--border)' }} onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }} /><span className="tiny muted">تظهر الصورة بجانب السؤال في الورق، وفوقه/تحته إلكترونياً حسب اختيارك.</span></div> : null}
-    </details>
-    </div> : null}
-  </div>;
+function CreatorExamTryout({ title, subject, duration, questions, onClose }: { title: string; subject: string; duration: number; questions: ExamQuestion[]; onClose: () => void }) {
+  const [answers, setAnswers] = useState<ExamAnswer[]>(() => questions.map(defaultAnswer));
+  const [current, setCurrent] = useState(0);
+  const [finished, setFinished] = useState(false);
+  const [secondsLeft, setSecondsLeft] = useState(Math.max(1, duration) * 60);
+  useEffect(() => { setAnswers(questions.map(defaultAnswer)); setCurrent(0); setFinished(false); setSecondsLeft(Math.max(1, duration) * 60); }, [questions, duration]);
+  useEffect(() => {
+    if (finished || secondsLeft <= 0) return;
+    const timer = window.setTimeout(() => setSecondsLeft((value) => Math.max(0, value - 1)), 1000);
+    return () => window.clearTimeout(timer);
+  }, [finished, secondsLeft]);
+  const progress = useMemo(() => {
+    const answered = answers.filter((answer, index) => isExamQuestionAnswered(questions[index], answer)).length;
+    return { answered, total: questions.length, percentage: questions.length ? Math.round((answered / questions.length) * 100) : 0 };
+  }, [answers, questions]);
+  const question = questions[current];
+  const time = `${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60).padStart(2, '0')}`;
+  return <main className="exam-tryout-page" dir="rtl"><header className="exam-tryout-head"><div><span className="exam-tryout-kicker">وضع تجربة المنشئ</span><h1>{title.trim() || 'اختبار غير محفوظ'}</h1><p>{subject || 'بدون مادة'} · تجربة تفاعلية لا تحفظ أي إجابة أو نتيجة</p></div><div className="row"><Badge tone={secondsLeft < 60 ? 'danger' : 'info'}>⏱ {time}</Badge><Button type="button" variant="secondary" onClick={onClose}>← الرجوع للمحرر</Button></div></header><div className="exam-tryout-content">{finished ? <Card className="stack exam-tryout-finish"><div className="logo">✓</div><h2 className="h2">انتهت التجربة</h2><p className="muted">لم تحفظ إجاباتك ولم تُسجل أي نتيجة أو محاولة طالب.</p><p className="small">أجبت عن {progress.answered} من {progress.total} أسئلة تجريبية.</p><Button type="button" onClick={onClose}>العودة لتعديل الاختبار</Button></Card> : <><Card className="stack compact"><div className="row-between"><span className="muted small">التقدم التجريبي: {progress.answered} من {progress.total}</span><span className="muted small">{progress.percentage}%</span></div><div className="progress-track"><div className="progress-fill" style={{ width: `${progress.percentage}%` }} /></div><div className="exam-nav">{questions.map((item, index) => <button type="button" key={index} className={`exam-nav-btn ${index === current ? 'on' : ''} ${isExamQuestionAnswered(item, answers[index]) ? 'done' : ''}`} onClick={() => setCurrent(index)}>{index + 1}</button>)}</div></Card>{question ? <Card className="stack exam-tryout-question"><div className="row-between"><Badge tone="info">{EXAM_TYPE_LABEL[question.type] ?? question.type}</Badge><Badge>{question.marks} درجة</Badge></div>{question.image && question.imagePosition !== 'below' ? <QuestionImage q={question} mode="screen" /> : null}<h2>{current + 1}. <UnderlinedQuestionText question={question} /></h2><ExamQuestionInput question={question} value={answers[current]} onChange={(value) => setAnswers((old) => old.map((item, index) => index === current ? value : item))} />{question.image && question.imagePosition === 'below' ? <QuestionImage q={question} mode="screen" /> : null}</Card> : <EmptyState title="أضف سؤالاً لتبدأ التجربة" />}<div className="row-between"><Button type="button" variant="secondary" disabled={current === 0} onClick={() => setCurrent((value) => Math.max(0, value - 1))}>→ السابق</Button><Button type="button" onClick={() => setFinished(true)}>{secondsLeft <= 0 ? 'إنهاء التجربة' : 'إنهاء دون حفظ'}</Button><Button type="button" variant="secondary" disabled={current >= questions.length - 1} onClick={() => setCurrent((value) => Math.min(questions.length - 1, value + 1))}>التالي ←</Button></div></>}</div></main>;
 }
 
 type ExamLibraryType = 'all' | ExamDeliveryMode;
@@ -253,6 +207,8 @@ export default function AdminExamsPage() {
   /** الاختبار المحفوظ الذي تفتحه المعاينة من المكتبة؛ null يعني معاينة المسودة في المحرر. */
   const [previewSource, setPreviewSource] = useState<AppExam | null>(null);
   const [previewMode, setPreviewMode] = useState<'paper' | 'electronic'>('paper');
+  const [tryoutOpen, setTryoutOpen] = useState(false);
+  const [titleError, setTitleError] = useState(false);
   const [resultsExam, setResultsExam] = useState<AppExam | null>(null);
   const [settingsExam, setSettingsExam] = useState<AppExam | null>(null);
   const [settingsForm, setSettingsForm] = useState<ExamSettingsDraft | null>(null);
@@ -274,6 +230,17 @@ export default function AdminExamsPage() {
   const validation = useMemo(() => validateExamDraft(questions.map((question, index) => ({ ...question, answer: typeof answers[index] === 'string' ? answers[index] as string : question.answer, corrects: Array.isArray(answers[index]) ? answers[index] as number[] : undefined }))), [questions, answers]);
   const total = examMarksTotal(questions);
   const groupsOfSelectedGrade = useMemo(() => form.grade_id ? groups.filter((group) => group.grade_id === form.grade_id) : [], [groups, form.grade_id]);
+  const questionSections = useMemo(() => {
+    const sections: Array<{ id: string; type: ExamQuestionType; indices: number[] }> = [];
+    const byId = new Map<string, { id: string; type: ExamQuestionType; indices: number[] }>();
+    questions.forEach((question, index) => {
+      const id = question.sectionId || `legacy-${index}`;
+      let section = byId.get(id);
+      if (!section) { section = { id, type: question.type, indices: [] }; byId.set(id, section); sections.push(section); }
+      section.indices.push(index);
+    });
+    return sections;
+  }, [questions]);
   const filteredExams = useMemo(() => {
     const query = librarySearch.trim().toLocaleLowerCase('ar-EG');
     return exams.filter((exam) => {
@@ -300,13 +267,20 @@ export default function AdminExamsPage() {
   const updateQuestion = (index: number, question: ExamQuestion) => setQuestions((old) => old.map((item, itemIndex) => itemIndex === index ? question : item));
   const updateAnswer = (index: number, answer: ExamAnswer) => setAnswers((old) => old.map((item, itemIndex) => itemIndex === index ? answer : item));
   const move = (index: number, delta: number) => {
-    const nextIndex = index + delta; if (nextIndex < 0 || nextIndex >= questions.length) return;
+    const nextIndex = index + delta;
+    if (nextIndex < 0 || nextIndex >= questions.length || questions[index]?.sectionId !== questions[nextIndex]?.sectionId) return;
     const nextQuestions = [...questions]; const nextAnswers = [...answers];
     [nextQuestions[index], nextQuestions[nextIndex]] = [nextQuestions[nextIndex], nextQuestions[index]];
     [nextAnswers[index], nextAnswers[nextIndex]] = [nextAnswers[nextIndex], nextAnswers[index]];
     setQuestions(nextQuestions); setAnswers(nextAnswers);
   };
   const addQuestion = (type: ExamQuestionType) => { const question = newQuestion(type); setQuestions((old) => [...old, question]); setAnswers((old) => [...old, defaultAnswer(question)]); };
+  const addSubQuestion = (sectionId: string, type: ExamQuestionType) => {
+    const question = newQuestion(type, sectionId);
+    const lastIndex = questions.reduce((last, item, index) => item.sectionId === sectionId ? index : last, -1);
+    setQuestions((old) => [...old.slice(0, lastIndex + 1), question, ...old.slice(lastIndex + 1)]);
+    setAnswers((old) => [...old.slice(0, lastIndex + 1), defaultAnswer(question), ...old.slice(lastIndex + 1)]);
+  };
   const removeQuestion = (index: number) => { if (questions.length === 1) return; setQuestions((old) => old.filter((_, itemIndex) => itemIndex !== index)); setAnswers((old) => old.filter((_, itemIndex) => itemIndex !== index)); };
 
   const reset = () => {
@@ -334,14 +308,18 @@ export default function AdminExamsPage() {
   const setExamGrade = (gradeId: string) => setForm((current) => ({ ...current, grade_id: gradeId, target_group_ids: [] }));
   const toggleTargetGroup = (groupId: string) => setForm((current) => ({ ...current, target_group_ids: current.target_group_ids.includes(groupId) ? current.target_group_ids.filter((id) => id !== groupId) : [...current.target_group_ids, groupId] }));
 
+  const saveError = (message: string, focusTitle = false) => {
+    const next = new Error(message); setError(next); toast.error('تعذر حفظ الاختبار', message);
+    if (focusTitle) window.setTimeout(() => document.getElementById('exam-title')?.focus(), 0);
+  };
   const submit = async (event?: React.FormEvent) => {
     event?.preventDefault();
     if (!centerId) return;
-    if (!form.title.trim()) return setError(new Error('اكتب عنوان الاختبار.'));
-    if (validation) return setError(new Error(validation));
+    if (!form.title.trim()) { setTitleError(true); saveError('اكتب عنوان الاختبار أولاً ثم احفظ المسودة.', true); return; }
+    if (validation) { saveError(validation); return; }
     if (form.delivery_mode === 'online' && form.availability_mode === 'scheduled') {
       const from = new Date(form.available_from); const until = new Date(form.available_until);
-      if (!form.available_from || !form.available_until || Number.isNaN(from.getTime()) || Number.isNaN(until.getTime()) || from >= until) return setError(new Error('حدد وقت فتح وإغلاق صحيحين؛ يجب أن يكون الإغلاق بعد الفتح.'));
+      if (!form.available_from || !form.available_until || Number.isNaN(from.getTime()) || Number.isNaN(until.getTime()) || from >= until) { saveError('حدد وقت فتح وإغلاق صحيحين؛ يجب أن يكون الإغلاق بعد الفتح.'); return; }
     }
     setBusy(true); setError(null);
     try {
@@ -349,7 +327,7 @@ export default function AdminExamsPage() {
       setForm((current) => ({ ...current, id: examId }));
       toast.success('تم حفظ الاختبار', form.delivery_mode === 'paper' ? 'حُفظت ورقة الاختبار؛ يمكنك طباعتها أو تحميلها PDF.' : form.is_published ? 'الاختبار محفوظ ومنشور للطلاب المستهدفين.' : 'الاختبار محفوظ كمسودة.');
       await load();
-    } catch (err) { setError(err); }
+    } catch (err) { setError(err); toast.error('تعذر حفظ الاختبار', err instanceof Error ? err.message : 'تحقق من اتصالك ثم أعد المحاولة.'); }
     finally { setBusy(false); }
   };
   const remove = async (id: string) => { if (!confirm('حذف الاختبار ومحاولاته؟')) return; try { await deleteExam(id); setSelected(null); setAttempts([]); setWorkspace('library'); await load(); toast.success('تم حذف الاختبار'); } catch (err) { setError(err); } };
@@ -440,6 +418,8 @@ export default function AdminExamsPage() {
       <Button type="button" variant="ghost" onClick={() => void remove(exam.id)}>حذف</Button>
     </div>;
   };
+  if (tryoutOpen) return <CreatorExamTryout title={form.title} subject={form.subject} duration={Number(form.duration) || 30} questions={questions} onClose={() => setTryoutOpen(false)} />;
+
   const library = <>
     <PageHeader title="الاختبارات" subtitle="أنشئ اختباراً ورقياً للطباعة، أو اختباراً إلكترونياً يؤديه الطلاب من بوابتهم وتصل محاولاتهم إليك مباشرة." actions={<Button type="button" onClick={() => setChooseTypeOpen(true)}>+ إنشاء اختبار جديد</Button>} />
     <ErrorNotice error={error} />
@@ -449,11 +429,16 @@ export default function AdminExamsPage() {
     {filteredExams.length === 0 ? <Card><EmptyState title={exams.length ? 'لا توجد اختبارات مطابقة للفلاتر' : 'لا توجد اختبارات بعد'} body={exams.length ? 'جرّب تغيير الفلاتر أو إعادة تعيينها.' : 'اختر اختباراً ورقياً أو إلكترونياً لبدء الإنشاء.'} action={<Button type="button" onClick={() => setChooseTypeOpen(true)}>إنشاء أول اختبار</Button>} /></Card> : libraryView === 'grid' ? <section key="exams-grid" className="exam-library-grid">{filteredExams.map((exam) => <Card className="exam-library-card" key={exam.id}><div className="exam-library-card-top"><span className={`exam-card-icon ${exam.delivery_mode ?? 'online'}`}>{(exam.delivery_mode ?? 'online') === 'paper' ? '🖨' : '◉'}</span><Badge tone="default">{formatDate(exam.created_at)}</Badge></div><div className="exam-card-title"><h2 className="h3">{exam.title}</h2><p className="muted small">{exam.subject || 'بدون مادة'}</p></div>{renderExamBadges(exam)}<div className="exam-card-footer">{renderExamActions(exam, 'card')}</div></Card>)}</section> : <section key="exams-list" className="exam-library-list">{filteredExams.map((exam) => <Card className="exam-library-row" key={exam.id}><span className={`exam-card-icon ${exam.delivery_mode ?? 'online'}`}>{(exam.delivery_mode ?? 'online') === 'paper' ? '🖨' : '◉'}</span><div className="exam-row-main"><div className="row"><h2 className="h3">{exam.title}</h2><Badge tone="default">{exam.questions.length} سؤال</Badge></div><p className="muted small">{exam.subject || 'بدون مادة'} · {grades.find((grade) => grade.id === exam.grade_id)?.name ?? 'كل الصفوف'} · أُنشئ {formatDate(exam.created_at)}</p>{renderExamBadges(exam)}</div>{renderExamActions(exam, 'row')}</Card>)}</section>}
   </>;
 
-  const builder = <section className="exam-editor-fullscreen" dir="rtl"><header className="exam-editor-topbar"><div><div className="row"><h1 className="h3">{form.id ? 'تعديل الاختبار' : 'إنشاء اختبار جديد'}</h1><Badge tone={form.delivery_mode === 'online' ? 'info' : 'default'}>{form.delivery_mode === 'online' ? `إلكتروني — ${ONLINE_MODES.find((mode) => mode.id === form.online_mode)?.title}` : 'ورقي للطباعة'}</Badge></div><p className="muted small">{form.delivery_mode === 'online' ? 'اضبط الإتاحة والمجموعات، ثم انشر الاختبار عندما يصبح جاهزاً.' : 'اكتب الورقة، اختر قالبها وزخارفها، ثم اطبعها أو احفظها PDF.'}</p></div><div className="row"><span className="editor-save-state">{form.id ? '✓ مسودة محفوظة' : 'لم يُحفظ بعد'}</span><Button type="button" variant="secondary" onClick={() => setWorkspace('library')}>← العودة للاختبارات</Button></div></header><main className="exam-editor-main"><div className="exam-builder-steps"><span className="active">1. الإعداد والنطاق</span><span>2. التحكم والإتاحة</span><span>3. الأسئلة</span><span>4. المعاينة والحفظ</span></div><div className="exam-builder-layout"><div className="stack exam-editor-stack"><section className="exam-workspace-section"><div className="exam-editor-section-title"><span>1</span><div><h2 className="h3">بيانات الاختبار والنطاق</h2><p>اختر الصف أولاً؛ بعدها تظهر مجموعاته فقط للتحكم في من يرى الاختبار.</p></div></div><Card className="stack"><div className="grid grid-3"><Input label="عنوان الاختبار" value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} required /><Input label="المادة" value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} /><Select label="الصف المستهدف" value={form.grade_id} onChange={(event) => setExamGrade(event.target.value)}><option value="">كل الصفوف</option>{grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}</Select><Input label="المدة بالدقائق" type="number" min={1} value={form.duration} onChange={(event) => setForm({ ...form, duration: event.target.value })} /><Input label="عدد المحاولات لكل طالب" type="number" min={1} value={form.attempts} onChange={(event) => setForm({ ...form, attempts: event.target.value })} /><Select label="إظهار النتيجة" value={form.show_result} onChange={(event) => setForm({ ...form, show_result: event.target.value as ExamResultMode })}><option value="end">بعد التسليم</option><option value="after_each">بعد كل سؤال</option><option value="never">بعد تحرير النتائج فقط</option></Select></div>{form.delivery_mode === 'online' ? <div className="scope-picker"><div className="row-between"><div><strong>المجموعات المستهدفة</strong><p className="muted small">اتركها بلا اختيار ليظهر الاختبار لجميع مجموعات الصف. لا تظهر أبداً مجموعات صف آخر.</p></div><Badge tone="info">{form.target_group_ids.length ? `${form.target_group_ids.length} محددة` : 'كل مجموعات الصف'}</Badge></div>{form.grade_id ? <div className="target-group-chips">{groupsOfSelectedGrade.length ? groupsOfSelectedGrade.map((group) => <button type="button" key={group.id} className={form.target_group_ids.includes(group.id) ? 'active' : ''} onClick={() => toggleTargetGroup(group.id)}>{form.target_group_ids.includes(group.id) ? '✓ ' : ''}{group.name}</button>) : <Notice tone="warn">لا توجد مجموعات في هذا الصف.</Notice>}</div> : <Notice tone="info">الاختبار العام يظهر لكل الصفوف؛ اختر صفاً لإتاحة اختيار المجموعات.</Notice>}</div> : null}</Card></section><section className="exam-workspace-section"><div className="exam-editor-section-title"><span>2</span><div><h2 className="h3">التحكم والشكل</h2><p>{form.delivery_mode === 'online' ? 'حدد نمط الأداء والإتاحة قبل النشر.' : 'اختر قالب الورقة والزخارف التي تناسب المادة.'}</p></div></div><Card className="stack">{form.delivery_mode === 'online' ? <><div className="online-mode-row">{ONLINE_MODES.map((mode) => <button type="button" key={mode.id} className={form.online_mode === mode.id ? 'active' : ''} onClick={() => setForm({ ...form, online_mode: mode.id })}><strong>{mode.title}</strong><small>{mode.lead}</small><em>{mode.description}</em></button>)}</div><div className="row-between"><div><strong>نشر الاختبار للطلاب</strong><p className="muted small">يمكن حفظ المسودة أولاً ثم النشر بعد استكمال الأسئلة.</p></div><label className="switch-row"><input type="checkbox" checked={form.is_published} onChange={(event) => setForm({ ...form, is_published: event.target.checked })} /><span>{form.is_published ? 'منشور' : 'مسودة'}</span></label></div><div className="availability-panel"><strong>إتاحة الاختبار</strong><div className="tabs"><button type="button" className={`tab ${form.availability_mode === 'always' ? 'active' : ''}`} onClick={() => setForm({ ...form, availability_mode: 'always' })}>مفتوح دائماً</button><button type="button" className={`tab ${form.availability_mode === 'scheduled' ? 'active' : ''}`} onClick={() => setForm({ ...form, availability_mode: 'scheduled' })}>فترة زمنية محددة</button></div>{form.availability_mode === 'scheduled' ? <div className="grid grid-2"><Input label="يفتح في" type="datetime-local" value={form.available_from} onChange={(event) => setForm({ ...form, available_from: event.target.value })} /><Input label="يغلق في" type="datetime-local" value={form.available_until} onChange={(event) => setForm({ ...form, available_until: event.target.value })} /></div> : <p className="muted small">سيظهر الاختبار المنشور فوراً للطلاب المستهدفين.</p>}</div></> : <><div className="template-picker">{PAPER_TEMPLATES.map((template) => <button type="button" key={template.id} className={form.paper_template === template.id ? 'active' : ''} onClick={() => setForm({ ...form, paper_template: template.id })}><span>{template.symbol}</span><strong>{template.title}</strong><small>{template.description}</small></button>)}</div><details className="exam-appearance-panel"><summary>🎨 تخصيص الزخارف والأختام (اختياري)</summary><div className="stack" style={{ marginTop: 12 }}><div className="row-between"><h3 className="h3">زخارف ورقة الاختبار</h3><Button type="button" variant="secondary" onClick={() => setOrnaments({ ...ornaments, kinds: ornamentsForSubject(form.subject).map((ornament) => ornament.kind) })}>تعبئة حسب المادة ({subjectLabelFor(form.subject)})</Button></div><div className="grid grid-3"><Select label="أسلوب التوزيع" value={ornaments.placement} onChange={(event) => setOrnaments({ ...ornaments, placement: event.target.value as 'auto' | 'manual' })}><option value="auto">تلقائي على الحواف</option><option value="manual">يدوي (أختام)</option></Select><Select label="الكثافة" value={ornaments.density} onChange={(event) => setOrnaments({ ...ornaments, density: event.target.value as ExamOrnaments['density'] })}><option value="low">خفيفة</option><option value="medium">متوسطة</option><option value="high">كثيفة</option></Select><div className="input-wrap"><span className="label">الشفافية: {Math.round((ornaments.opacity ?? 0.18) * 100)}%</span><input className="input" type="range" min={4} max={50} value={Math.round((ornaments.opacity ?? 0.18) * 100)} onChange={(event) => setOrnaments({ ...ornaments, opacity: Number(event.target.value) / 100 })} /></div></div><div className="stamp-palette">{ALL_ORNAMENTS.map((ornament) => { const active = ornaments.kinds.includes(ornament.kind); return <button key={ornament.kind} type="button" title={ornament.label} className={`stamp-chip ${active ? 'active' : ''}`} onClick={() => setOrnaments({ ...ornaments, kinds: active ? ornaments.kinds.filter((kind) => kind !== ornament.kind) : [...ornaments.kinds, ornament.kind] })}>{ornament.glyph}</button>; })}</div>{ornaments.placement === 'manual' ? <Notice tone="info">افتح المعاينة الورقية ثم اختر ختماً واضغط على الورقة لوضعه.</Notice> : null}</div></details></>}</Card></section><section className="exam-workspace-section"><div className="exam-editor-section-title"><span>3</span><div><h2 className="h3">إضافة وبناء الأسئلة</h2><p>أضف سؤالاً رئيسياً، ثم افتح بطاقته للتفاصيل ومفتاح التصحيح.</p></div><Badge tone="info">{questions.length} سؤال · {total} درجة</Badge></div><Card className="stack"><div className="exam-type-palette">{EGYPT_TYPES.map((type) => <button key={type.type} type="button" className="exam-type-btn" onClick={() => addQuestion(type.type)}><span className="exam-type-icon">{type.icon}</span><span>{type.label}</span></button>)}</div>{form.delivery_mode === 'online' ? <Notice tone="info">النمط المختار يوجه طريقة التصحيح فقط؛ أبقينا كل أنواع الأسئلة الجديدة المتاحة في Mr Center.</Notice> : null}</Card><div className="questions-workspace">{questions.map((question, index) => <div key={`${question.type}-${index}`}>{(index === 0 || questions[index - 1]?.type !== question.type) ? <div className="question-section-divider"><span>{egyptMeta(question.type).icon}</span><strong>{egyptMeta(question.type).label}</strong><small>{egyptMeta(question.type).manual ? 'تصحيح يدوي' : 'تصحيح تلقائي'}</small></div> : null}<QuestionEditor q={question} answer={answers[index]} index={index} onQuestion={(next) => updateQuestion(index, next)} onAnswer={(next) => updateAnswer(index, next)} onDelete={() => removeQuestion(index)} onMove={(delta) => move(index, delta)} /></div>)}</div></section>{selected ? <section className="exam-workspace-section"><div className="exam-editor-section-title"><span>4</span><div><h2 className="h3">المحاولات والتصحيح</h2><p>راجع إجابات الطلاب سؤالاً بسؤال وحرر النتيجة بعد اعتمادها.</p></div><Badge tone="info">{attempts.length} محاولة</Badge></div><Card className="stack">{attempts.length === 0 ? <EmptyState title="لا توجد محاولات بعد" /> : <div className="table-wrap"><table><thead><tr><th>الطالب</th><th>الدرجة</th><th>الحالة</th><th>التاريخ</th><th>إجراء</th></tr></thead><tbody>{attempts.map((attempt) => <tr key={attempt.id}><td><strong>{studentName.get(attempt.student_id) ?? attempt.student_id}</strong></td><td>{attempt.score} / {attempt.max_score}</td><td><Badge tone={attempt.status === 'graded' ? 'success' : 'warn'}>{attempt.status === 'graded' ? 'مصححة' : 'بانتظار المراجعة'}</Badge></td><td>{formatDate(attempt.created_at)}</td><td><div className="row"><Button type="button" variant="secondary" onClick={() => openReview(attempt)}>مراجعة</Button><input className="input" style={{ width: 86 }} value={manualScores[attempt.id] ?? ''} onChange={(event) => setManualScores({ ...manualScores, [attempt.id]: event.target.value })} placeholder="درجة" inputMode="decimal" /><Button type="button" variant="ghost" onClick={() => void grade(attempt.id)}>حفظ سريع</Button></div></td></tr>)}</tbody></table></div>}</Card></section> : null}</div></div></main><footer className="exam-editor-footer"><div>{validation ? <span className="editor-validation">⚠ {validation}</span> : <span className="editor-validation good">✓ الاختبار يحتوي على {questions.length} سؤال و{total} درجة</span>}</div><div className="row"><Button type="button" variant="secondary" onClick={() => { setPreviewSource(null); setPreview(true); }}>معاينة قبل الحفظ</Button><Button type="button" disabled={busy} onClick={() => void submit()}>{busy ? 'جاري الحفظ...' : form.delivery_mode === 'paper' ? '💾 حفظ ورقة الاختبار' : form.is_published ? '💾 حفظ ونشر الاختبار' : '💾 حفظ المسودة'}</Button></div></footer></section>;
+  const builder = <section className="exam-editor-fullscreen" dir="rtl"><header className="exam-editor-topbar"><div><div className="row"><h1 className="h3">{form.id ? 'تعديل الاختبار' : 'إنشاء اختبار جديد'}</h1><Badge tone={form.delivery_mode === 'online' ? 'info' : 'default'}>{form.delivery_mode === 'online' ? `إلكتروني — ${ONLINE_MODES.find((mode) => mode.id === form.online_mode)?.title}` : 'ورقي للطباعة'}</Badge></div><p className="muted small">{form.delivery_mode === 'online' ? 'اضبط الإتاحة والمجموعات، ثم انشر الاختبار عندما يصبح جاهزاً.' : 'اكتب الورقة، اختر قالبها وزخارفها، ثم اطبعها أو احفظها PDF.'}</p></div><div className="row"><span className="editor-save-state">{form.id ? '✓ مسودة محفوظة' : 'لم يُحفظ بعد'}</span><Button type="button" variant="secondary" onClick={() => setWorkspace('library')}>← العودة للاختبارات</Button></div></header><main className="exam-editor-main"><ErrorNotice error={error} /><div className="exam-builder-steps"><span className="active">1. الإعداد والنطاق</span><span>2. التحكم والإتاحة</span><span>3. الأسئلة</span><span>4. المعاينة والحفظ</span></div><div className="exam-builder-layout"><div className="stack exam-editor-stack"><section className="exam-workspace-section"><div className="exam-editor-section-title"><span>1</span><div><h2 className="h3">بيانات الاختبار والنطاق</h2><p>اختر الصف أولاً؛ بعدها تظهر مجموعاته فقط للتحكم في من يرى الاختبار.</p></div></div><Card className="stack"><div className="grid grid-3"><Input id="exam-title" label="عنوان الاختبار" value={form.title} onChange={(event) => { setForm({ ...form, title: event.target.value }); setTitleError(false); }} required aria-invalid={titleError} help={titleError ? 'عنوان الاختبار مطلوب قبل الحفظ.' : undefined} /><Input label="المادة" value={form.subject} onChange={(event) => setForm({ ...form, subject: event.target.value })} /><Select label="الصف المستهدف" value={form.grade_id} onChange={(event) => setExamGrade(event.target.value)}><option value="">كل الصفوف</option>{grades.map((grade) => <option key={grade.id} value={grade.id}>{grade.name}</option>)}</Select><Input label="المدة بالدقائق" type="number" min={1} value={form.duration} onChange={(event) => setForm({ ...form, duration: event.target.value })} /><Input label="عدد المحاولات لكل طالب" type="number" min={1} value={form.attempts} onChange={(event) => setForm({ ...form, attempts: event.target.value })} /><Select label="إظهار النتيجة" value={form.show_result} onChange={(event) => setForm({ ...form, show_result: event.target.value as ExamResultMode })}><option value="end">بعد التسليم</option><option value="after_each">بعد كل سؤال</option><option value="never">بعد تحرير النتائج فقط</option></Select></div>{form.delivery_mode === 'online' ? <div className="scope-picker"><div className="row-between"><div><strong>المجموعات المستهدفة</strong><p className="muted small">اتركها بلا اختيار ليظهر الاختبار لجميع مجموعات الصف. لا تظهر أبداً مجموعات صف آخر.</p></div><Badge tone="info">{form.target_group_ids.length ? `${form.target_group_ids.length} محددة` : 'كل مجموعات الصف'}</Badge></div>{form.grade_id ? <div className="target-group-chips">{groupsOfSelectedGrade.length ? groupsOfSelectedGrade.map((group) => <button type="button" key={group.id} className={form.target_group_ids.includes(group.id) ? 'active' : ''} onClick={() => toggleTargetGroup(group.id)}>{form.target_group_ids.includes(group.id) ? '✓ ' : ''}{group.name}</button>) : <Notice tone="warn">لا توجد مجموعات في هذا الصف.</Notice>}</div> : <Notice tone="info">الاختبار العام يظهر لكل الصفوف؛ اختر صفاً لإتاحة اختيار المجموعات.</Notice>}</div> : null}</Card></section><section className="exam-workspace-section"><div className="exam-editor-section-title"><span>2</span><div><h2 className="h3">التحكم والشكل</h2><p>{form.delivery_mode === 'online' ? 'حدد نمط الأداء والإتاحة قبل النشر.' : 'اختر قالب الورقة والزخارف التي تناسب المادة.'}</p></div></div><Card className="stack">{form.delivery_mode === 'online' ? <><div className="online-mode-row">{ONLINE_MODES.map((mode) => <button type="button" key={mode.id} className={form.online_mode === mode.id ? 'active' : ''} onClick={() => setForm({ ...form, online_mode: mode.id })}><strong>{mode.title}</strong><small>{mode.lead}</small><em>{mode.description}</em></button>)}</div><div className="row-between"><div><strong>نشر الاختبار للطلاب</strong><p className="muted small">يمكن حفظ المسودة أولاً ثم النشر بعد استكمال الأسئلة.</p></div><label className="switch-row"><input type="checkbox" checked={form.is_published} onChange={(event) => setForm({ ...form, is_published: event.target.checked })} /><span>{form.is_published ? 'منشور' : 'مسودة'}</span></label></div><div className="availability-panel"><strong>إتاحة الاختبار</strong><div className="tabs"><button type="button" className={`tab ${form.availability_mode === 'always' ? 'active' : ''}`} onClick={() => setForm({ ...form, availability_mode: 'always' })}>مفتوح دائماً</button><button type="button" className={`tab ${form.availability_mode === 'scheduled' ? 'active' : ''}`} onClick={() => setForm({ ...form, availability_mode: 'scheduled' })}>فترة زمنية محددة</button></div>{form.availability_mode === 'scheduled' ? <div className="grid grid-2"><Input label="يفتح في" type="datetime-local" value={form.available_from} onChange={(event) => setForm({ ...form, available_from: event.target.value })} /><Input label="يغلق في" type="datetime-local" value={form.available_until} onChange={(event) => setForm({ ...form, available_until: event.target.value })} /></div> : <p className="muted small">سيظهر الاختبار المنشور فوراً للطلاب المستهدفين.</p>}</div></> : <><div className="template-picker">{PAPER_TEMPLATES.map((template) => <button type="button" key={template.id} className={form.paper_template === template.id ? 'active' : ''} onClick={() => setForm({ ...form, paper_template: template.id })}><span>{template.symbol}</span><strong>{template.title}</strong><small>{template.description}</small></button>)}</div><details className="exam-appearance-panel"><summary>🎨 تخصيص الزخارف والأختام (اختياري)</summary><div className="stack" style={{ marginTop: 12 }}><div className="row-between"><h3 className="h3">زخارف ورقة الاختبار</h3><Button type="button" variant="secondary" onClick={() => setOrnaments({ ...ornaments, kinds: ornamentsForSubject(form.subject).map((ornament) => ornament.kind) })}>تعبئة حسب المادة ({subjectLabelFor(form.subject)})</Button></div><div className="grid grid-3"><Select label="أسلوب التوزيع" value={ornaments.placement} onChange={(event) => setOrnaments({ ...ornaments, placement: event.target.value as 'auto' | 'manual' })}><option value="auto">تلقائي على الحواف</option><option value="manual">يدوي (أختام)</option></Select><Select label="الكثافة" value={ornaments.density} onChange={(event) => setOrnaments({ ...ornaments, density: event.target.value as ExamOrnaments['density'] })}><option value="low">خفيفة</option><option value="medium">متوسطة</option><option value="high">كثيفة</option></Select><div className="input-wrap"><span className="label">الشفافية: {Math.round((ornaments.opacity ?? 0.18) * 100)}%</span><input className="input" type="range" min={4} max={50} value={Math.round((ornaments.opacity ?? 0.18) * 100)} onChange={(event) => setOrnaments({ ...ornaments, opacity: Number(event.target.value) / 100 })} /></div></div><div className="stamp-palette">{ALL_ORNAMENTS.map((ornament) => { const active = ornaments.kinds.includes(ornament.kind); return <button key={ornament.kind} type="button" title={ornament.label} className={`stamp-chip ${active ? 'active' : ''}`} onClick={() => setOrnaments({ ...ornaments, kinds: active ? ornaments.kinds.filter((kind) => kind !== ornament.kind) : [...ornaments.kinds, ornament.kind] })}>{ornament.glyph}</button>; })}</div>{ornaments.placement === 'manual' ? <Notice tone="info">افتح المعاينة الورقية ثم اختر ختماً واضغط على الورقة لوضعه.</Notice> : null}</div></details></>}</Card></section><section className="exam-workspace-section">
+  <div className="exam-editor-section-title"><span>3</span><div><h2 className="h3">بناء الأسئلة</h2><p>أضف سؤالاً رئيسياً من النوع المطلوب، ثم أضف تحته الأسئلة الفرعية كما في Center Publish.</p></div></div>
+  <Card className="stack"><div className="exam-type-palette">{EGYPT_TYPES.map((type) => <button key={type.type} type="button" className="exam-type-btn" onClick={() => addQuestion(type.type)}><span className="exam-type-icon">{type.icon}</span><span>إضافة سؤال رئيسي: {type.label}</span></button>)}</div></Card>
+  <div className="questions-workspace">{questionSections.map((section, mainIndex) => { const meta = egyptMeta(section.type); return <section key={section.id} className="exam-main-question"><div className="exam-main-question-head"><div><span className="exam-main-question-index">السؤال {mainIndex + 1}</span><h3>{meta.header}</h3><p>{meta.manual ? 'تصحيح يدوي بعد التسليم' : 'تصحيح تلقائي عند التسليم'}</p></div><Badge tone="info">{section.indices.length} سؤال فرعي</Badge></div><div className="exam-subquestions">{section.indices.map((questionIndex, subIndex) => <QuestionEditor key={`${section.id}-${questionIndex}`} q={questions[questionIndex]} answer={answers[questionIndex]} mainNumber={mainIndex + 1} subNumber={subIndex + 1} onQuestion={(next) => updateQuestion(questionIndex, next)} onAnswer={(next) => updateAnswer(questionIndex, next)} onDelete={() => removeQuestion(questionIndex)} onMove={(delta) => move(questionIndex, delta)} />)}</div><Button type="button" variant="secondary" className="block" onClick={() => addSubQuestion(section.id, section.type)}>＋ إضافة سؤال فرعي جديد ({section.indices.length + 1})</Button></section>; })}</div>
+  <p className="exam-builder-total">إجمالي الاختبار: <strong>{questions.length}</strong> سؤال فرعي · <strong>{total}</strong> درجة</p>
+</section>{selected ? <section className="exam-workspace-section"><div className="exam-editor-section-title"><span>4</span><div><h2 className="h3">المحاولات والتصحيح</h2><p>راجع إجابات الطلاب سؤالاً بسؤال وحرر النتيجة بعد اعتمادها.</p></div><Badge tone="info">{attempts.length} محاولة</Badge></div><Card className="stack">{attempts.length === 0 ? <EmptyState title="لا توجد محاولات بعد" /> : <div className="table-wrap"><table><thead><tr><th>الطالب</th><th>الدرجة</th><th>الحالة</th><th>التاريخ</th><th>إجراء</th></tr></thead><tbody>{attempts.map((attempt) => <tr key={attempt.id}><td><strong>{studentName.get(attempt.student_id) ?? attempt.student_id}</strong></td><td>{attempt.score} / {attempt.max_score}</td><td><Badge tone={attempt.status === 'graded' ? 'success' : 'warn'}>{attempt.status === 'graded' ? 'مصححة' : 'بانتظار المراجعة'}</Badge></td><td>{formatDate(attempt.created_at)}</td><td><div className="row"><Button type="button" variant="secondary" onClick={() => openReview(attempt)}>مراجعة</Button><input className="input" style={{ width: 86 }} value={manualScores[attempt.id] ?? ''} onChange={(event) => setManualScores({ ...manualScores, [attempt.id]: event.target.value })} placeholder="درجة" inputMode="decimal" /><Button type="button" variant="ghost" onClick={() => void grade(attempt.id)}>حفظ سريع</Button></div></td></tr>)}</tbody></table></div>}</Card></section> : null}</div></div></main><footer className="exam-editor-footer"><div>{validation ? <span className="editor-validation">⚠ {validation}</span> : <span className="editor-validation good">✓ الاختبار يحتوي على {questions.length} سؤال و{total} درجة</span>}</div><div className="row"><Button type="button" variant="secondary" onClick={() => setTryoutOpen(true)}>اختبر كطالب</Button><Button type="button" variant="secondary" onClick={() => { setPreviewSource(null); setPreview(true); }}>معاينة قبل الحفظ</Button><Button type="button" disabled={busy} onClick={() => void submit()}>{busy ? 'جاري الحفظ...' : form.delivery_mode === 'paper' ? '💾 حفظ ورقة الاختبار' : form.is_published ? '💾 حفظ ونشر الاختبار' : '💾 حفظ المسودة'}</Button></div></footer></section>;
 
   return <>
     {workspace === 'library' ? library : builder}
-    <Modal open={chooseTypeOpen} title="اختر نوع الاختبار" subtitle="اختر طريقة أداء الطلاب أولاً؛ ستفتح لك مساحة إنشاء مناسبة لكل مسار." onClose={() => setChooseTypeOpen(false)} wide footer={<Button type="button" variant="ghost" onClick={() => setChooseTypeOpen(false)}>إلغاء</Button>}><div className="exam-create-choices"><button type="button" className="exam-create-choice paper" onClick={() => beginCreate('paper')}><span className="exam-create-icon">🖨</span><strong>اختبار ورقي</strong><span>اكتب الأسئلة، اختر قالب الورقة والزخارف، ثم عاينها واطبعها PDF.</span><em>ورقة مطبوعة</em></button><button type="button" className="exam-create-choice online" onClick={() => beginCreate('online')}><span className="exam-create-icon">◉</span><strong>اختبار إلكتروني</strong><span>يؤديه الطلاب من حسابهم، مع النشر، الإتاحة، المجموعات، المحاولات والتصحيح.</span><em>أداء إلكتروني ونتائج</em></button></div><Notice tone="info">اختر المسار أولاً كما في Center Publish؛ لا تُفقد أي ميزة موجودة في Mr Center ويمكنك فتح المعاينة الورقية والإلكترونية في المسارين.</Notice></Modal>
+    <Modal open={chooseTypeOpen} title="اختر نوع الاختبار" subtitle="اختر طريقة أداء الطلاب أولاً؛ ستفتح لك مساحة إنشاء مناسبة لكل مسار." onClose={() => setChooseTypeOpen(false)} wide footer={<Button type="button" variant="ghost" onClick={() => setChooseTypeOpen(false)}>إلغاء</Button>}><div className="exam-create-choices"><button type="button" className="exam-create-choice paper" onClick={() => beginCreate('paper')}><span className="exam-create-icon">🖨</span><strong>اختبار ورقي</strong><span>اكتب الأسئلة، اختر قالب الورقة والزخارف، ثم عاينها واطبعها PDF.</span><em>ورقة مطبوعة</em></button><button type="button" className="exam-create-choice online" onClick={() => beginCreate('online')}><span className="exam-create-icon">◉</span><strong>اختبار إلكتروني</strong><span>يؤديه الطلاب من حسابهم، مع النشر، الإتاحة، المجموعات، المحاولات والتصحيح.</span><em>أداء إلكتروني ونتائج</em></button></div></Modal>
     <Modal open={chooseOnlineModeOpen} title="اختر نمط الاختبار الإلكتروني" subtitle="يمكنك تغييره لاحقاً من مساحة التحكم، مع بقاء كل أنواع أسئلة Mr Center متاحة." onClose={() => setChooseOnlineModeOpen(false)} wide footer={<Button type="button" variant="ghost" onClick={() => setChooseOnlineModeOpen(false)}>إلغاء</Button>}><div className="online-mode-row dialog">{ONLINE_MODES.map((mode) => <button type="button" key={mode.id} onClick={() => openEditor('online', mode.id)}><strong>{mode.title}</strong><small>{mode.lead}</small><em>{mode.description}</em></button>)}</div></Modal>
     <Modal
       open={preview}

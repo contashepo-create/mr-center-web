@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Badge, Button, Card, EmptyState, ErrorNotice, Input, Notice, PageHeader, formatStatus } from '@/components/ui';
+import { Badge, Button, Card, EmptyState, ErrorNotice, Notice, PageHeader, formatStatus } from '@/components/ui';
 import { ExamReview } from '@/components/exam/review';
+import { ExamQuestionInput, UnderlinedQuestionText, isExamQuestionAnswered } from '@/components/exam/interactive-input';
 import { QuestionImage } from '@/components/exam/ornaments';
-import { CHOICE_KEYS } from '@/lib/exam-egyptian';
 import { fetchMyExamAttempts, fetchPublishedExams, submitExam, type ExamResult } from '@/lib/api';
 import type { ExamAnswer, ExamAttempt, ExamQuestion, PublishedExam } from '@/lib/types';
 import { EXAM_TYPE_LABEL, formatDate, normalizeAnswerText } from '@/lib/utils';
@@ -14,50 +14,6 @@ function defaultAnswer(q: ExamQuestion): ExamAnswer {
   if (q.type === 'multi' || q.type === 'match') return [];
   if (q.type === 'complete' || q.type === 'correct' || q.type === 'essay' || q.type === 'short') return '';
   return null;
-}
-
-function isAnswered(q: ExamQuestion, a: ExamAnswer): boolean {
-  if (q.type === 'mcq' || q.type === 'tf') return a !== null && a !== undefined && a !== '';
-  if (q.type === 'multi') return Array.isArray(a) && a.length > 0;
-  if (q.type === 'match') return Array.isArray(a) && a.length === (q.pairs?.length ?? 0) && a.every((item) => typeof item === 'number' && item >= 0);
-  return typeof a === 'string' && a.trim() !== '';
-}
-
-/** مطابقة تفاعلية باللمس أو الفأرة: اختر بنداً من العمود (أ) ثم المطابق من (ب)، بلا قوائم منسدلة. */
-function InteractiveMatch({ pairs, value, onChange }: { pairs: { l: string; r: string }[]; value: number[]; onChange: (value: ExamAnswer) => void }) {
-  const [activeLeft, setActiveLeft] = useState<number | null>(null);
-  useEffect(() => setActiveLeft(null), [pairs]);
-  const mapping = pairs.map((_, index) => typeof value[index] === 'number' ? value[index] : -1);
-  const firstUnmatched = mapping.findIndex((rightIndex) => rightIndex < 0);
-  const connect = (rightIndex: number) => {
-    const leftIndex = activeLeft ?? firstUnmatched;
-    if (leftIndex < 0) return;
-    const next = [...mapping];
-    // لا يمكن إسناد بند من العمود (ب) إلى بندين؛ ننقله بدلاً من ذلك.
-    const previousLeft = next.findIndex((assigned) => assigned === rightIndex);
-    if (previousLeft >= 0 && previousLeft !== leftIndex) next[previousLeft] = -1;
-    next[leftIndex] = rightIndex;
-    onChange(next);
-    setActiveLeft(next.findIndex((assigned) => assigned < 0));
-  };
-  const clear = (leftIndex: number) => { const next = [...mapping]; next[leftIndex] = -1; onChange(next); setActiveLeft(leftIndex); };
-  return <div className="interactive-match" dir="rtl">
-    <div className="interactive-match-help"><strong>وصّل بين العمودين</strong><span>اضغط بنداً من (أ)، ثم اختر المطابق من (ب).</span><Badge tone="info">{mapping.filter((item) => item >= 0).length} / {pairs.length}</Badge></div>
-    <div className="interactive-match-grid"><div className="match-column"><span className="match-column-title">العمود (أ)</span>{pairs.map((pair, leftIndex) => <button type="button" key={`left-${leftIndex}`} className={`match-card left ${activeLeft === leftIndex ? 'active' : ''} ${mapping[leftIndex] >= 0 ? 'matched' : ''}`} onClick={() => setActiveLeft(leftIndex)}><span className="match-index">{leftIndex + 1}</span><span>{pair.l || `البند ${leftIndex + 1}`}</span>{mapping[leftIndex] >= 0 ? <em onClick={(event) => { event.stopPropagation(); clear(leftIndex); }} title="إلغاء هذا الربط">×</em> : null}</button>)}</div><div className="match-connector-column" aria-hidden="true">{pairs.map((_, index) => <span key={index} className={mapping[index] >= 0 ? 'connected' : ''}>↔</span>)}</div><div className="match-column"><span className="match-column-title">العمود (ب)</span>{pairs.map((pair, rightIndex) => { const usedBy = mapping.indexOf(rightIndex); return <button type="button" key={`right-${rightIndex}`} className={`match-card right ${activeLeft !== null && mapping[activeLeft] === rightIndex ? 'paired-active' : ''} ${usedBy >= 0 ? 'used' : ''}`} onClick={() => connect(rightIndex)}><span className="match-index">{CHOICE_KEYS[rightIndex] ?? rightIndex + 1}</span><span>{pair.r || `البند ${rightIndex + 1}`}</span>{usedBy >= 0 ? <small>مرتبط بـ {usedBy + 1}</small> : null}</button>; })}</div></div>
-  </div>;
-}
-
-function QuestionInput({ q, value, onChange }: { q: ExamQuestion; value: ExamAnswer; onChange: (v: ExamAnswer) => void }) {
-  if (q.type === 'mcq' || q.type === 'tf') {
-    const choices = q.type === 'tf' && (!q.choices || q.choices.length === 0) ? ['صح', 'خطأ'] : q.choices;
-    return <div className="stack" style={{ gap: 8 }}>{choices.map((c, i) => <button type="button" key={i} className={`card compact soft row ${value === i ? 'choice-selected' : ''}`} style={{ width: '100%', textAlign: 'start', cursor: 'pointer', border: value === i ? '2px solid var(--accent)' : undefined }} onClick={() => onChange(i)}><span className={`choice-dot ${value === i ? 'on' : ''}`} />{q.type === 'tf' ? c : `${CHOICE_KEYS[i]}) ${c}`}</button>)}</div>;
-  }
-  if (q.type === 'multi') {
-    const arr = Array.isArray(value) ? value : [];
-    return <div className="stack">{q.choices.map((c, i) => <label key={i} className="row small" style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 14, background: 'var(--soft)' }}><input type="checkbox" checked={arr.includes(i)} onChange={(e) => onChange(e.target.checked ? [...arr, i] : arr.filter((x) => x !== i))} /> {CHOICE_KEYS[i]}) {c}</label>)}</div>;
-  }
-  if (q.type === 'match') return <InteractiveMatch pairs={q.pairs ?? []} value={Array.isArray(value) ? value : []} onChange={onChange} />;
-  return <Input label="إجابتك" value={typeof value === 'string' ? value : ''} onChange={(e) => onChange(e.target.value)} />;
 }
 
 export default function StudentExamsPage() {
@@ -91,7 +47,7 @@ export default function StudentExamsPage() {
   const progress = useMemo(() => {
     if (!active) return { answered: 0, total: 0, pct: 0 };
     const total = active.questions.length;
-    const answered = answers.filter((a, i) => isAnswered(active.questions[i], a)).length;
+    const answered = answers.filter((a, i) => isExamQuestionAnswered(active.questions[i], a)).length;
     return { answered, total, pct: total ? Math.round((answered / total) * 100) : 0 };
   }, [active, answers]);
 
@@ -179,7 +135,7 @@ export default function StudentExamsPage() {
               <div className="progress-track"><div className="progress-fill" style={{ width: `${progress.pct}%` }} /></div>
               <div className="exam-nav">
                 {active.questions.map((qq, i) => (
-                  <button key={i} type="button" className={`exam-nav-btn ${i === current ? 'on' : ''} ${isAnswered(qq, answers[i]) ? 'done' : ''}`} onClick={() => setCurrent(i)}>{i + 1}</button>
+                  <button key={i} type="button" className={`exam-nav-btn ${i === current ? 'on' : ''} ${isExamQuestionAnswered(qq, answers[i]) ? 'done' : ''}`} onClick={() => setCurrent(i)}>{i + 1}</button>
                 ))}
               </div>
             </div>
@@ -191,8 +147,8 @@ export default function StudentExamsPage() {
                   <Badge>{q.marks} درجة</Badge>
                 </div>
                 {q.image && q.imagePosition !== 'below' ? <QuestionImage q={q} mode="screen" /> : null}
-                <strong>{current + 1}. {q.q}</strong>
-                <QuestionInput q={q} value={answers[current]} onChange={(v) => setAnswers((old) => old.map((x, idx) => idx === current ? v : x))} />
+                <strong>{current + 1}. <UnderlinedQuestionText question={q} /></strong>
+                <ExamQuestionInput question={q} value={answers[current]} onChange={(v) => setAnswers((old) => old.map((x, idx) => idx === current ? v : x))} />
                 {q.image && q.imagePosition === 'below' ? <QuestionImage q={q} mode="screen" /> : null}
               </div>
             ) : null}

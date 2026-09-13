@@ -218,6 +218,7 @@ export function seededShuffle(n: number, seed: string): number[] {
 export function validateExamDraft(qs: {
   q: string; type: string; choices: string[]; marks: number;
   answer?: string; pairs?: { l: string; r: string }[]; corrects?: number[];
+  underlined?: { start: number; count: number };
 }[]): string | null {
   if (!qs || qs.length === 0) return 'أضف سؤالاً واحداً على الأقل';
   for (let i = 0; i < qs.length; i++) {
@@ -233,6 +234,9 @@ export function validateExamDraft(qs: {
     }
     if (q.type === 'complete' && !(q.answer ?? '').trim()) {
       return `اكتب الإجابة النموذجية للسؤال رقم ${n} (أكمل الفراغ)`;
+    }
+    if (q.type === 'correct' && (!(q.underlined?.count) || q.underlined.start < 1)) {
+      return `حدد الكلمة التي تحتها خط في السؤال رقم ${n} (صوّب ما تحته خط)`;
     }
     if (q.type === 'match') {
       const pairs = q.pairs ?? [];

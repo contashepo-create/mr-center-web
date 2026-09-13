@@ -8,10 +8,12 @@
 // + صورة السؤال حسب المكان والحجم المختارين.
 // ============================================================
 
-import type { ExamOrnaments, ExamQuestion, PaperTemplate } from '@/lib/types';
+import { useEffect, useState } from 'react';
+import type { ExamAnswer, ExamOrnaments, ExamQuestion, PaperTemplate } from '@/lib/types';
 import { EXAM_TYPE_LABEL } from '@/lib/utils';
 import { arabicNum, CHOICE_KEYS, paperSections } from '@/lib/exam-egyptian';
 import { PaperOrnaments, QuestionImage } from './ornaments';
+import { ExamQuestionInput, UnderlinedQuestionText } from './interactive-input';
 
 export function ExamPaper({
   title,
@@ -100,7 +102,7 @@ function ExamItem({ q, index }: { q: ExamQuestion; index: number }) {
           ) : (
             <p className="exam-paper-q-body">
               <span className="exam-paper-q-no">{num} – </span>
-              {q.q}
+              <UnderlinedQuestionText question={q} />
             </p>
           )}
 
@@ -152,41 +154,22 @@ function ExamItem({ q, index }: { q: ExamQuestion; index: number }) {
   );
 }
 
-/** المعاينة الإلكترونية (كما يراها الطالب) مع صورة السؤال فوق/تحت */
+/** معاينة إلكترونية تفاعلية مطابقة لتجربة الطالب، من دون إرسال أو حفظ أي إجابات. */
 export function ElectronicExamView({ questions }: { questions: ExamQuestion[] }) {
+  const emptyAnswers = () => questions.map<ExamAnswer>(() => null);
+  const [answers, setAnswers] = useState<ExamAnswer[]>(emptyAnswers);
+  useEffect(() => { setAnswers(emptyAnswers()); }, [questions]);
+
   return (
-    <div className="stack">
+    <div className="stack electronic-exam-preview">
       {questions.map((q, i) => (
-        <div key={i} className="card compact soft stack">
+        <div key={`${q.sectionId ?? 'question'}-${i}`} className="card compact soft stack">
           <div className="row-between">
-            <strong>{arabicNum(i + 1)}. {q.q}</strong>
+            <strong>{arabicNum(i + 1)}. <UnderlinedQuestionText question={q} /></strong>
             <span className="badge info">{EXAM_TYPE_LABEL[q.type] ?? q.type} · {q.marks} درجة</span>
           </div>
           {q.image && q.imagePosition !== 'below' ? <QuestionImage q={q} mode="screen" /> : null}
-          {q.type === 'mcq' || q.type === 'multi' ? (
-            <div className="stack">
-              {q.choices.slice(0, 4).map((c, j) => (
-                <label key={j} className="row small">
-                  <input type={q.type === 'mcq' ? 'radio' : 'checkbox'} disabled name={`pv-${i}`} /> {CHOICE_KEYS[j]}) {c || '—'}
-                </label>
-              ))}
-            </div>
-          ) : null}
-          {q.type === 'tf' ? <div className="tabs"><span className="tab">صح</span><span className="tab">خطأ</span></div> : null}
-          {q.type === 'match' ? (
-            <div className="grid grid-2">
-              {(q.pairs ?? []).map((p, j) => (
-                <div key={j} className="row">
-                  <span>{p.l}</span>
-                  <select className="select" disabled style={{ width: 140 }}><option>اختر المطابق</option></select>
-                  <span>{p.r}</span>
-                </div>
-              ))}
-            </div>
-          ) : null}
-          {q.type === 'complete' || q.type === 'essay' || q.type === 'short' || q.type === 'correct' ? (
-            <div className="input-wrap"><span className="label">إجابة الطالب</span><input className="input" disabled placeholder="يكتب الطالب إجابته هنا" /></div>
-          ) : null}
+          <ExamQuestionInput question={q} value={answers[i] ?? null} onChange={(answer) => setAnswers((old) => old.map((item, index) => index === i ? answer : item))} />
           {q.image && q.imagePosition === 'below' ? <QuestionImage q={q} mode="screen" /> : null}
         </div>
       ))}

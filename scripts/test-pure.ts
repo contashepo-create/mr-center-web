@@ -30,6 +30,7 @@ import { decodeCenterQr, decodeStudentQr, encodeCenterQr, encodeStudentQr, fnv1a
 import { toWaNumber, waLink } from '../src/lib/whatsapp';
 import { shouldExposeStoredSession } from '../src/lib/auth/clientSession';
 import { operatingExpense, periodTotals, summarizeEmployeePayroll } from '../src/lib/accounting';
+import { paperSections } from '../src/lib/exam-egyptian';
 
 function profile(role: Profile['role'], perms: Profile['perms'] = {}, active = true): Profile {
   return {
@@ -68,6 +69,13 @@ assert.equal(isManualExamType('essay'), true);
 assert.equal(examMarksTotal([{ marks: 2 }, { marks: 3 }]), 5);
 assert.equal(validateExamDraft([{ q: 'سؤال', type: 'mcq', choices: ['أ', 'ب', 'ج', 'د'], marks: 1 }]), null);
 assert.match(validateExamDraft([{ q: '', type: 'mcq', choices: ['أ', 'ب', 'ج', 'د'], marks: 1 }]) ?? '', /نص السؤال/);
+assert.match(validateExamDraft([{ q: 'صحح العبارة', type: 'correct', choices: [], marks: 1 }]) ?? '', /تحتها خط/);
+assert.equal(validateExamDraft([{ q: 'صحح العبارة', type: 'correct', choices: [], marks: 1, underlined: { start: 2, count: 1 } }]), null);
+assert.deepEqual(paperSections([
+  { type: 'mcq', q: 'أ', choices: [], marks: 1, sectionId: 'first' },
+  { type: 'mcq', q: 'ب', choices: [], marks: 1, sectionId: 'first' },
+  { type: 'mcq', q: 'ج', choices: [], marks: 1, sectionId: 'second' },
+]).map((section) => [section.sectionId, section.items.length, section.marks]), [['first', 2, 2], ['second', 1, 1]]);
 assert.deepEqual(seededShuffle(5, 'abc').sort(), [0, 1, 2, 3, 4]);
 assert.equal(findGroupConflicts([
   { id: '1', name: 'أ', days: ['sat'], start_time: '09:00', end_time: '10:00' },
