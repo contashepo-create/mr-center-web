@@ -12,11 +12,12 @@
     "test:routes": "node scripts/check-routes.mjs",
     "audit:security": "node scripts/audit-security.mjs",
     "smoke": "node scripts/smoke-pages.mjs",
-    "test": "npm run typecheck && npm run test:pure && npm run test:routes && npm run audit:code && npm run audit:security && npm run audit:accounting",
+    "test": "npm run typecheck && npm run test:pure && npm run test:routes && npm run audit:code && npm run audit:security && npm run audit:accounting && npm run audit:collections",
     "test:e2e:live": "node scripts/e2e-live.mjs",
     "compare:android": "node scripts/compare-android-parity.mjs",
     "audit:code": "node scripts/audit-code-health.mjs",
-    "audit:accounting": "node scripts/audit-accounting.mjs"
+    "audit:accounting": "node scripts/audit-accounting.mjs",
+    "audit:collections": "node scripts/audit-collections.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",

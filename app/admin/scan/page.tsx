@@ -10,7 +10,10 @@ import { can } from '@/lib/rbac';
 import { decodeStudentQr, isQrFresh } from '@/lib/qr';
 import { todayIso } from '@/lib/utils';
 
-type BarcodeDetectorCtor = new (opts?: { formats?: string[] }) => { detect: (source: CanvasImageSource) => Promise<{ rawValue: string }[]> };
+type BarcodeDetectorCtor = {
+  new (opts?: { formats?: string[] }): { detect: (source: CanvasImageSource) => Promise<{ rawValue: string }[]> };
+  getSupportedFormats?: () => Promise<string[]>;
+};
 
 declare global { interface Window { BarcodeDetector?: BarcodeDetectorCtor } }
 

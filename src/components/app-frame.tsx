@@ -32,7 +32,7 @@ const adminNav: NavGroup[] = [
     { href: '/admin/surveys', label: 'الاستبيانات', icon: '📋', perm: 'surveys' }, { href: '/admin/library', label: 'المكتبة والشرف', icon: '📚', perm: 'honors' },
   ] },
   { title: 'المالية', icon: '◈', accent: '#14b87a', items: [
-    { href: '/admin/payments', label: 'المدفوعات', icon: '💳', perm: 'collect' },
+    { href: '/admin/payments', label: 'التحصيل', icon: '💳', perm: 'collect' },
     { href: '/admin/accounting', label: 'المحاسبة والعهدة', icon: '💼', ownerOnly: true, feature: 'accounting' },
     { href: '/admin/reports', label: 'تقارير الطلاب', icon: '📊', perm: 'reports' },
   ] },

@@ -11,7 +11,7 @@ import type {
   Center, CenterLookup, CenterSettings, Due, ExamAttempt, Grade,
   ExamAnswer, ExamQuestion, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
   PublishedExam, SessionRecord, Student, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
-  SurveyAnswer, SurveyQuestion,
+  SurveyAnswer, SurveyQuestion, StudentAccount,
 } from './types';
 
 // ------------------------------------------------------------
@@ -548,6 +548,8 @@ export async function upsertGroup(centerId: string, group: Partial<Group> & { na
     billing_type: group.billing_type ?? 'monthly',
     weekly_price: group.weekly_price ?? 0,
     session_price: group.session_price ?? 0,
+    due_mode: group.due_mode ?? 'manual',
+    attendance_due_amount: group.attendance_due_amount ?? 0,
   };
   if (group.id) {
     const { error } = await getSupabase().from('groups').update(payload).eq('id', group.id);
@@ -665,11 +667,15 @@ export async function saveAttendance(
     created_at: byStudent.get(r.student_id)?.created_at ?? nowIso(),
   }));
   if (upserts.length === 0) return;
-  const { error } = await getSupabase().from('attendance').upsert(upserts);
+  const sb = getSupabase();
+  const { error } = await sb.from('attendance').upsert(upserts);
   if (error) throw error;
+  // الدالة خادمية وidempotent: لا تنشئ مستحقين للحصة نفسها، وتطبق الرصيد المقدم تلقائياً.
+  const { error: duesError } = await sb.rpc('sync_attendance_dues_for_session', { p_center: centerId, p_session: sessionId });
+  if (duesError) throw duesError;
 }
 
-// ---------- المدفوعات والمستحقات ----------
+// ---------- التحصيل والمستحقات ----------
 
 export async function fetchDues(centerId: string, month: number, year: number): Promise<Due[]> {
   const { data, error } = await getSupabase().from('dues').select('*')
@@ -682,24 +688,16 @@ export async function fetchDues(centerId: string, month: number, year: number): 
 export async function generateDuesForGroup(
   centerId: string, group: Group, month: number, year: number,
 ): Promise<{ created: number; amount: number; skippedNoSessions: boolean }> {
-  const inGroup = await fetchGroupMembers(centerId, group.id);
-  if (inGroup.length === 0) return { created: 0, amount: 0, skippedNoSessions: false };
-  const amount = await dueAmountForGroup(centerId, group, month, year);
-  if (amount === null) return { created: 0, amount: 0, skippedNoSessions: true };
-  const existing = await fetchDues(centerId, month, year);
-  // طالب المجموعتين يستحق عن كل مجموعة على حدة (المفتاح طالب+مجموعة)
-  const existingKeys = new Set(existing.filter((d) => d.group_id === group.id).map((d) => d.student_id));
-  const rows = inGroup
-    .filter((s) => !existingKeys.has(s.id))
-    .map((s) => ({
-      id: uuid(), center_id: centerId, student_id: s.id, group_id: group.id,
-      month, due_year: year, amount, status: 'pending', created_at: nowIso(),
-    }));
-  if (rows.length > 0) {
-    const { error } = await getSupabase().from('dues').insert(rows);
-    if (error) throw error;
-  }
-  return { created: rows.length, amount, skippedNoSessions: false };
+  const { data, error } = await getSupabase().rpc('generate_manual_dues_for_group', {
+    p_center: centerId, p_group: group.id, p_month: month, p_year: year,
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as { created?: number; amount?: number; skipped_no_sessions?: boolean };
+  return {
+    created: Number(result.created ?? 0),
+    amount: Number(result.amount ?? 0),
+    skippedNoSessions: Boolean(result.skipped_no_sessions),
+  };
 }
 
 /** مبلغ الاستحقاق حسب نظام التسعير — null إن كان بالحصة ولا حصص مسجلة بعد */
@@ -810,6 +808,47 @@ export async function recordPayment(input: {
     p_notes: input.notes?.trim() || null,
   });
   if (error) throw error;
+}
+
+/** تحصيل مقدم للطالب: يظهر رصيداً دائنًا ويُطبّق تلقائياً على مستحق قائم إن وجد. */
+export async function recordStudentCredit(input: {
+  centerId: string; studentId: string; amount: number; month: number; year: number; notes?: string;
+}): Promise<void> {
+  await recordPayment({ ...input, dueId: null });
+}
+
+/** تحصيل المستحقات المختارة من مجموعة في معاملة واحدة؛ الاختيار نفسه لا يحفظ شيئاً. */
+export async function recordBulkDuePayments(input: {
+  centerId: string; month: number; year: number; items: { dueId: string; amount: number }[]; notes?: string;
+}): Promise<{ count: number; total: number }> {
+  if (input.items.length === 0) throw new Error('اختر طالباً واحداً على الأقل.');
+  const { data, error } = await getSupabase().rpc('record_bulk_due_payments', {
+    p_center: input.centerId,
+    p_month: input.month,
+    p_year: input.year,
+    p_items: input.items.map((item) => ({ due_id: item.dueId, amount: Number(item.amount) })),
+    p_notes: input.notes?.trim() || null,
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as { count?: number; total?: number };
+  return { count: Number(result.count ?? 0), total: Number(result.total ?? 0) };
+}
+
+/** كشف موحد للمستحقات والرصيد المقدم والتسويات؛ مصدره RPC محمي. */
+export async function fetchStudentAccount(centerId: string, studentId: string): Promise<StudentAccount> {
+  const { data, error } = await getSupabase().rpc('get_student_account', { p_center: centerId, p_student: studentId });
+  if (error) throw error;
+  return (data ?? {}) as StudentAccount;
+}
+
+/** تصفير الرصيد أو المديونية دون إدراج دفعة جديدة أو خلق إيراد ثانٍ. */
+export async function settleStudentAccount(centerId: string, studentId: string, notes?: string): Promise<{ creditSettled: number; debtSettled: number }> {
+  const { data, error } = await getSupabase().rpc('settle_student_account', {
+    p_center: centerId, p_student: studentId, p_notes: notes?.trim() || null,
+  });
+  if (error) throw error;
+  const result = (data ?? {}) as { credit_settled?: number; debt_settled?: number };
+  return { creditSettled: Number(result.credit_settled ?? 0), debtSettled: Number(result.debt_settled ?? 0) };
 }
 
 export async function updateStudentGroup(studentId: string, groupId: string | null, gradeId: string | null): Promise<void> {

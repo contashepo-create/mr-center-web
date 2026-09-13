@@ -54,6 +54,8 @@ assert.equal(isValidSupabaseUrl('https://abc.supabase.co'), true);
 assert.equal(arabicError(new Error('invalid_payment_amount')), 'أدخل مبلغ تحصيل صحيحاً أكبر من صفر');
 assert.equal(arabicError(new Error('due_not_found')), 'المستحق المحدد غير موجود أو لا تملك صلاحية تحصيله');
 assert.equal(arabicError(new Error('advance_exceeds_balance')), 'قيمة السلفة المسوّاة أكبر من رصيد سلف الموظف القائم');
+assert.match(arabicError(new Error('group_uses_attendance_dues')), /الحضور/);
+assert.match(arabicError(new Error('invalid_bulk_payment')), /الجماعي/);
 assert.deepEqual(dbConfigFromRemote({ database: { url: 'https://abc.supabase.co', anon_key: 'anon' } }), { url: 'https://abc.supabase.co', anonKey: 'anon' });
 
 assert.equal(arabicDay('sat'), 'السبت');

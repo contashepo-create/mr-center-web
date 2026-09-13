@@ -386,6 +386,10 @@ export function arabicError(err: unknown): string {
   if (msg.includes('login_rate_limited')) return 'محاولات دخول كثيرة — انتظر قليلاً ثم أعد المحاولة';
   if (msg.includes('invalid_payment_amount')) return 'أدخل مبلغ تحصيل صحيحاً أكبر من صفر';
   if (msg.includes('invalid_payment_period')) return 'شهر أو سنة التحصيل غير صحيحين';
+  if (msg.includes('group_uses_attendance_dues')) return 'هذه المجموعة مضبوطة لإنشاء الاستحقاق عند الحضور — غيّر طريقتها من صفحة الصفوف والمجموعات أولاً';
+  if (msg.includes('invalid_due_period')) return 'شهر أو سنة الاستحقاق غير صحيحين';
+  if (msg.includes('invalid_bulk_payment')) return 'راجع الطلاب والمبالغ المختارة للتحصيل الجماعي ثم حاول مرة أخرى';
+  if (msg.includes('session_not_found')) return 'الحصة المحددة غير موجودة أو لا تخص هذا السنتر';
   if (msg.includes('payment_exceeds_remaining')) return 'المبلغ أكبر من المتبقي في هذا المستحق — لا يمكن تجاوز قيمة المستحق';
   if (msg.includes('student_not_in_center')) return 'الطالب المحدد لا يخص هذا السنتر';
   if (msg.includes('center_inactive')) return 'السنتر موقوف أو الاشتراك منتهي — لا يمكن تنفيذ هذه العملية حالياً';

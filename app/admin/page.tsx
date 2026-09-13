@@ -74,7 +74,7 @@ export default function AdminDashboardPage() {
           <div className="grid grid-2">
             <LinkButton href="/admin/groups" variant="secondary">المجموعات</LinkButton>
             <LinkButton href="/admin/attendance" variant="secondary">الحضور</LinkButton>
-            <LinkButton href="/admin/payments" variant="secondary">المدفوعات</LinkButton>
+            <LinkButton href="/admin/payments" variant="secondary">التحصيل</LinkButton>
             <LinkButton href="/admin/announcements" variant="secondary">الإعلانات</LinkButton>
           </div>
         </Card>
