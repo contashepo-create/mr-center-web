@@ -45,6 +45,8 @@ has(sql, /CREATE OR REPLACE FUNCTION public\.record_staff_commission_payment/i, 
 has(sql, /CREATE OR REPLACE FUNCTION public\.record_manual_ledger_entry/i, 'SQL: secure manual ledger RPC is missing');
 has(accounting, /entry_type === 'advance'[\s\S]{0,120}return 0/, 'Client accounting rules must exclude advances from operating cost');
 has(accounting, /gross_amount \?\? row\.amount/, 'Client accounting rules must use gross payroll cost');
+has(accounting, /- valueOf\(row\.deduction\)/, 'Client accounting rules must subtract salary deductions from operating cost');
+has(sql, /commission_amount, 0\) - coalesce\(deduction, 0\)/, 'SQL: fiscal close must subtract payroll deductions from operating cost');
 has(page, /record_manual_ledger_entry/, 'Accounting UI: manual income/expense RPC is not connected');
 has(page, /record_payroll_settlement/, 'Accounting UI: payroll settlement RPC is not connected');
 has(page, /record_staff_advance/, 'Accounting UI: staff advance RPC is not connected');

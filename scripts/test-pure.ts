@@ -112,16 +112,16 @@ assert.equal(shouldExposeStoredSession(JSON.stringify({ refresh_token: 'legacy-r
 // المحاسبة: السلفة حركة نقدية وذمة للموظف، وليست تكلفة إضافية بجانب الراتب.
 const accountingRows = [
   { id: 'advance', kind: 'expense' as const, entry_type: 'advance' as const, amount: 200, employee_id: 'teacher-1', affects_profit: false },
-  { id: 'salary', kind: 'expense' as const, entry_type: 'salary' as const, amount: 850, gross_amount: 1000, bonus_amount: 50, advance_applied: 200, deduction: 0, employee_id: 'teacher-1', affects_profit: true },
+  { id: 'salary', kind: 'expense' as const, entry_type: 'salary' as const, amount: 800, gross_amount: 1000, bonus_amount: 50, advance_applied: 200, deduction: 50, employee_id: 'teacher-1', affects_profit: true },
   { id: 'income', kind: 'income' as const, entry_type: 'general' as const, amount: 2000, affects_profit: true },
 ];
 assert.equal(operatingExpense(accountingRows[0]), 0);
-assert.equal(operatingExpense(accountingRows[1]), 1050);
-assert.deepEqual(periodTotals(accountingRows), { income: 2000, operatingCosts: 1050, netProfit: 950, cashIncome: 2000, cashOut: 1050, cashNet: 950, advances: 200 });
+assert.equal(operatingExpense(accountingRows[1]), 1000);
+assert.deepEqual(periodTotals(accountingRows), { income: 2000, operatingCosts: 1000, netProfit: 1000, cashIncome: 2000, cashOut: 1000, cashNet: 1000, advances: 200 });
 assert.deepEqual(summarizeEmployeePayroll(accountingRows, 'teacher-1'), {
   employeeId: 'teacher-1', baseSalary: 1000, bonuses: 50, commissions: 0,
   advancesIssued: 200, advancesApplied: 200, advancesOutstanding: 0,
-  deductions: 0, cashPaid: 850, netPayroll: 850,
+  deductions: 50, cashPaid: 800, netPayroll: 800,
 });
 
 console.log('✅ pure logic tests passed');

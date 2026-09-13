@@ -10,6 +10,7 @@
 -- الفكرة المحاسبية:
 -- * السلفة نقد خرج من الخزينة، لكنها ليست مصروف تشغيل ولا تُحسب مرتين.
 -- * تسوية الراتب تحفظ الإجمالي والخصم والسلفة المخصومة وصافي ما دُفع نقداً.
+-- * الخصم يقلل تكلفة الراتب؛ أما السلفة المسوّاة فهي استرداد ذمة ولا تقللها.
 -- * قائمة الدخل تعرض تكلفة الراتب الحقيقية، والتدفق النقدي يعرض كل ما دخل وخرج.
 -- ============================================================================
 
@@ -226,13 +227,14 @@ END; $$;
 GRANT EXECUTE ON FUNCTION public.record_staff_commission_payment(uuid,uuid,numeric,date,text) TO authenticated;
 
 -- ----------------------------------------------------------------------------
--- ٧) إغلاق السنة: المصروف التشغيلي لا يشمل السلف، والرواتب بالإجمالي لا بالصافي.
+-- ٧) إغلاق السنة: المصروف التشغيلي لا يشمل السلف، والراتب بعد خصم الموظف.
 -- ----------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.close_fiscal_year(p_center UUID)
 RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
 DECLARE
   v_year public.center_fiscal_years%ROWTYPE;
   v_income numeric(12,2) := 0; v_expense numeric(12,2) := 0;
+  v_cash_income numeric(12,2) := 0; v_cash_expense numeric(12,2) := 0;
   v_balance numeric(12,2) := 0; v_pending numeric(12,2) := 0;
   v_label text; v_next_start date; v_next_end date;
 BEGIN
@@ -248,12 +250,21 @@ BEGIN
    WHERE center_id = p_center AND kind = 'income' AND affects_profit IS NOT FALSE
      AND occurred_on BETWEEN v_year.starts_on AND v_year.ends_on;
   SELECT coalesce(sum(CASE WHEN entry_type = 'salary'
-    THEN coalesce(gross_amount, amount) + coalesce(bonus_amount, 0) + coalesce(commission_amount, 0)
+    THEN greatest(0, coalesce(gross_amount, amount) + coalesce(bonus_amount, 0)
+      + coalesce(commission_amount, 0) - coalesce(deduction, 0))
     ELSE amount END), 0) INTO v_expense
   FROM public.center_ledger
   WHERE center_id = p_center AND kind = 'expense' AND affects_profit IS NOT FALSE
     AND occurred_on BETWEEN v_year.starts_on AND v_year.ends_on;
-  v_balance := v_year.opening_balance + v_income - v_expense;
+
+  -- الرصيد الختامي رصيد نقدي فعلي: السلفة تخفضه عند صرفها حتى لو لم تكن تكلفة.
+  SELECT coalesce(sum(amount), 0) INTO v_cash_income FROM public.center_ledger
+  WHERE center_id = p_center AND kind = 'income'
+    AND occurred_on BETWEEN v_year.starts_on AND v_year.ends_on;
+  SELECT coalesce(sum(amount), 0) INTO v_cash_expense FROM public.center_ledger
+  WHERE center_id = p_center AND kind = 'expense'
+    AND occurred_on BETWEEN v_year.starts_on AND v_year.ends_on;
+  v_balance := v_year.opening_balance + v_cash_income - v_cash_expense;
   SELECT coalesce(sum(amount), 0) INTO v_pending FROM public.dues
    WHERE center_id = p_center AND status IN ('pending','partial')
      AND make_date(year, month, 1) BETWEEN v_year.starts_on AND v_year.ends_on;

@@ -49,14 +49,16 @@ export function cashEffect(row: AccountingLedgerRow): number {
 /**
  * تكلفة التشغيل التي تدخل قائمة الدخل.
  * السلفة لا تؤثر في الربح: هي مبلغ على الموظف ويُسوّى عند صرف راتبه.
- * أما تسوية الراتب فتسجل الراتب الإجمالي، لا صافي النقد المدفوع فقط.
+ * أما تسوية الراتب فتسجل الاستحقاق قبل السلفة، مع طرح الخصم من التكلفة.
+ * السلفة المسوّاة استرداد لذمة على الموظف وليست خصماً من تكلفة الراتب.
  */
 export function operatingExpense(row: AccountingLedgerRow): number {
   if (row.kind !== 'expense' || row.entry_type === 'advance' || row.affects_profit === false) return 0;
   if (row.entry_type === 'salary') {
-    return valueOf(row.gross_amount ?? row.amount)
+    return Math.max(0, valueOf(row.gross_amount ?? row.amount)
       + valueOf(row.bonus_amount)
-      + valueOf(row.commission_amount);
+      + valueOf(row.commission_amount)
+      - valueOf(row.deduction));
   }
   return valueOf(row.amount);
 }
