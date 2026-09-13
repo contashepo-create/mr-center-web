@@ -12,7 +12,7 @@ import type {
   Center, CenterLookup, CenterSettings, Due, ExamAttempt, Grade,
   ExamAnswer, ExamQuestion, Group, InquiryKind, InquiryStatus, ManualGrade, MyNotification, NotificationAudience, Payment, PlanType, Profile, PublicConfig,
   PublishedExam, SessionRecord, Student, Subscription, SubscriptionRequest, ActivityLog, SupportMessage, TeacherPerms,
-  SurveyAnswer, SurveyQuestion, StudentAccount,
+  SurveyAnswer, SurveyQuestion, StudentAccount, DeveloperBroadcastChannel, CenterBroadcastDelivery, DeveloperBroadcastResult,
 } from './types';
 
 // ------------------------------------------------------------
@@ -1332,6 +1332,38 @@ export async function fetchMySurveyResponses(studentId: string): Promise<AppSurv
 // ------------------------------------------------------------
 // الإشعارات الداخلية (بث جماعي بضغطة: صف واحد لكل رسالة)
 // ------------------------------------------------------------
+
+/** بث المطور عبر القنوات الخمس فقط؛ اختيار المستلمين والتحقق يتمان خادمياً. */
+export async function developerBroadcastNotification(input: {
+  channel: DeveloperBroadcastChannel;
+  title: string;
+  body: string;
+  centerId?: string | null;
+  centerDelivery?: CenterBroadcastDelivery | null;
+}): Promise<DeveloperBroadcastResult> {
+  const { data, error } = await getSupabase().rpc('developer_broadcast_notification', {
+    p_channel: input.channel,
+    p_title: input.title.trim(),
+    p_body: input.body.trim(),
+    p_center: input.centerId || null,
+    p_center_delivery: input.centerDelivery || null,
+  });
+  if (error) throw error;
+  return data as DeveloperBroadcastResult;
+}
+
+/** رسائل المطور الخاصة بصاحب السنتر أو موظفه، مفلترة حسب الحساب خادمياً. */
+export async function fetchMyDeveloperNotifications(): Promise<MyNotification[]> {
+  const { data, error } = await getSupabase().rpc('get_my_developer_notifications');
+  if (error) throw error;
+  return (data ?? []) as MyNotification[];
+}
+
+/** تعليم رسالة المطور المتاحة لهذا الحساب فقط كمقروءة. */
+export async function markDeveloperNotificationRead(notificationId: string): Promise<void> {
+  const { error } = await getSupabase().rpc('mark_developer_notification_read', { p_notification: notificationId });
+  if (error) throw error;
+}
 
 export async function fetchNotifications(centerId: string): Promise<AppNotification[]> {
   const { data, error } = await getSupabase().from('app_notifications').select('*')

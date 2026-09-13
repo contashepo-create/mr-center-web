@@ -44,7 +44,7 @@ const adminNav: NavGroup[] = [
   { title: 'إدارة السنتر', icon: '⚙', accent: '#f59e0b', items: [
     { href: '/admin/staff', label: 'فريق العمل', icon: '🧑‍🏫', ownerOnly: true }, { href: '/admin/settings', label: 'الإعدادات', icon: '⚙', ownerOnly: true },
     { href: '/admin/subscription', label: 'الاشتراك', icon: '◆', ownerOnly: true }, { href: '/admin/scan', label: 'ماسح QR', icon: '▣', perm: 'attendance' },
-    { href: '/admin/activity', label: 'سجل النشاط', icon: '≋', ownerOnly: true }, { href: '/admin/dev-notices', label: 'تنبيهات المطور', icon: '🛡', ownerOnly: true },
+    { href: '/admin/activity', label: 'سجل النشاط', icon: '≋', ownerOnly: true }, { href: '/admin/dev-notices', label: 'تنبيهات المطور', icon: '🛡' },
     { href: '/admin/guide', label: 'الدليل', icon: '؟' },
   ] },
 ];

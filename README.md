@@ -191,6 +191,7 @@ supabase/20260913_student_collections.sql         # التحصيل المتقد�
 supabase/20260913_student_access_and_custody_resolution.sql # عزل أجهزة الطلاب وتسوية عجز العهدة
 supabase/20260913_custody_subscription_integrity.sql # حفظ فروق العهدة وسلامة التحصيل بعد انتهاء الخدمة
 supabase/20260913_accounting_subscription_validity.sql # بوابة المحاسبة بحسب فترة الاشتراك الفعلية
+supabase/20260913_developer_broadcast_channels.sql # قنوات بث المطور الخمس وصندوق رسائل آمن للأصحاب والموظفين
 supabase/20260912_exams_complaints.sql           # محاولات الاختبارات المتعددة + طرق عرض النتيجة + قسم الشكاوي
 supabase/20260912_survey_model.sql               # نموذج الاستبيان الكامل (أنواع أسئلة/جمهور/موعد/خصوصية)
 supabase/20260912_grade_order.sql                # ترتيب المراحل الدراسية يدوياً

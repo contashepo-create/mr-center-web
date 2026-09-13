@@ -454,7 +454,18 @@ export interface AppSurveyResponse {
   created_at: string;
 }
 
-export type NotificationAudience = 'all' | 'grade' | 'group' | 'student' | 'owners';
+export type NotificationAudience = 'all' | 'grade' | 'group' | 'student' | 'owners' | 'staff';
+
+/** قنوات البث الخمس الحصرية في لوحة المطور. */
+export type DeveloperBroadcastChannel = 'center' | 'all_owners' | 'all_owners_students' | 'all_students' | 'staff';
+export type CenterBroadcastDelivery = 'owners' | 'owners_students';
+
+export interface DeveloperBroadcastResult {
+  channel: DeveloperBroadcastChannel;
+  centers: number;
+  notification_rows: number;
+  recipient_accounts: number;
+}
 
 export interface AppNotification {
   id: string;
