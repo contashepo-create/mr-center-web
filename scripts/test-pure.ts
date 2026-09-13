@@ -28,6 +28,7 @@ import {
 } from '../src/lib/utils';
 import { decodeCenterQr, decodeStudentQr, encodeCenterQr, encodeStudentQr, fnv1aHex, isQrFresh } from '../src/lib/qr';
 import { toWaNumber, waLink } from '../src/lib/whatsapp';
+import { shouldExposeStoredSession } from '../src/lib/auth/clientSession';
 
 function profile(role: Profile['role'], perms: Profile['perms'] = {}, active = true): Profile {
   return {
@@ -96,5 +97,14 @@ assert.equal(fnv1aHex('abc').length, 8);
 
 assert.equal(toWaNumber('01012345678'), '201012345678');
 assert.equal(waLink('01012345678', 'مرحبا')?.startsWith('https://wa.me/201012345678?text='), true);
+
+const authNow = 1_700_000_000_000;
+const accessOnlySession = (expiresAt: number) => JSON.stringify({
+  access_token: 'access-token', refresh_token: '', expires_at: expiresAt,
+});
+assert.equal(shouldExposeStoredSession(accessOnlySession(Math.floor(authNow / 1000) + 5 * 60), authNow), true);
+assert.equal(shouldExposeStoredSession(accessOnlySession(Math.floor(authNow / 1000) + 60), authNow), false);
+assert.equal(shouldExposeStoredSession('{bad json', authNow), false);
+assert.equal(shouldExposeStoredSession(JSON.stringify({ refresh_token: 'legacy-refresh-token' }), authNow), true);
 
 console.log('✅ pure logic tests passed');

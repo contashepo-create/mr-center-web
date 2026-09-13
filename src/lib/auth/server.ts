@@ -12,12 +12,18 @@ export interface ServerSupabaseConfig {
 let cachedConfig: { value: ServerSupabaseConfig | null; at: number } = { value: null, at: 0 };
 const CONFIG_TTL_MS = 60_000;
 
+function configUrl(): string {
+  // يجب أن يستخدم Route Handler المصدر نفسه الذي يستخدمه العميل؛ وإلا ينجح
+  // الاتصال الأول ثم يفشل تجديد الجلسة عندما يحدد النشر NEXT_PUBLIC_CONFIG_URL.
+  return (process.env.NEXT_PUBLIC_CONFIG_URL ?? '').trim() || DEFAULT_CONFIG_URL;
+}
+
 /** يُقرأ من Cloudflare (نفس المصدر الذي يقرأه Android) مع تخزين مؤقت قصير. */
 export async function getServerSupabaseConfig(): Promise<ServerSupabaseConfig | null> {
   const now = Date.now();
   if (cachedConfig.value && now - cachedConfig.at < CONFIG_TTL_MS) return cachedConfig.value;
   try {
-    const res = await fetch(DEFAULT_CONFIG_URL, { headers: { Accept: 'application/json' }, cache: 'no-store' });
+    const res = await fetch(configUrl(), { headers: { Accept: 'application/json' }, cache: 'no-store' });
     if (!res.ok) return cachedConfig.value;
     const data = (await res.json()) as { database?: { url?: string; anon_key?: string } };
     const url = data?.database?.url?.trim();
