@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS public.center_fiscal_years (
 
 -- CREATE TABLE IF NOT EXISTS لا يضيف أعمدة لجدول قديم، لذلك تضاف كل حقول
 -- واجهة الويب صراحةً وبصورة idempotent.
+ALTER TABLE public.center_fiscal_years ADD COLUMN IF NOT EXISTS fiscal_year INT;
 ALTER TABLE public.center_fiscal_years ADD COLUMN IF NOT EXISTS year_label TEXT;
 ALTER TABLE public.center_fiscal_years ADD COLUMN IF NOT EXISTS starts_on DATE;
 ALTER TABLE public.center_fiscal_years ADD COLUMN IF NOT EXISTS ends_on DATE;
@@ -66,6 +67,15 @@ $$;
 UPDATE public.center_fiscal_years
 SET ends_on = COALESCE(ends_on, (starts_on + INTERVAL '1 year - 1 day')::DATE)
 WHERE ends_on IS NULL;
+
+-- يبقى fiscal_year للتوافق مع تطبيق Android والإصدارات الأقدم، بينما تعتمد
+-- واجهة الويب على نطاق starts_on/ends_on. القيمة الافتراضية تمنع فشل الدوال
+-- القديمة التي كانت تدرج سنة جديدة بالحقول القديمة فقط.
+UPDATE public.center_fiscal_years
+SET fiscal_year = COALESCE(fiscal_year, EXTRACT(YEAR FROM starts_on)::INT)
+WHERE fiscal_year IS NULL;
+ALTER TABLE public.center_fiscal_years
+  ALTER COLUMN fiscal_year SET DEFAULT EXTRACT(YEAR FROM CURRENT_DATE)::INT;
 
 ALTER TABLE public.center_fiscal_years ALTER COLUMN year_label SET NOT NULL;
 ALTER TABLE public.center_fiscal_years ALTER COLUMN starts_on SET NOT NULL;
@@ -126,5 +136,62 @@ BEGIN
 END;
 $$;
 GRANT EXECUTE ON FUNCTION public.get_my_fiscal_years() TO authenticated;
+
+-- تصحيح الدالة الموجودة في قواعد حية طُبّق فيها الإصدار السابق من الترحيل:
+-- عمود dues.year أُعيدت تسميته إلى due_year، وكان المرجع القديم يفشل فقط عند
+-- إغلاق السنة. لا يعيد هذا إنشاء أي قيد أو يحذف تاريخاً؛ يستبدل جسم RPC فقط.
+CREATE OR REPLACE FUNCTION public.close_fiscal_year(p_center UUID)
+RETURNS JSONB LANGUAGE plpgsql SECURITY DEFINER SET search_path = public AS $$
+DECLARE
+  v_year public.center_fiscal_years%ROWTYPE;
+  v_income NUMERIC(12,2) := 0; v_expense NUMERIC(12,2) := 0;
+  v_cash_income NUMERIC(12,2) := 0; v_cash_expense NUMERIC(12,2) := 0;
+  v_balance NUMERIC(12,2) := 0; v_pending NUMERIC(12,2) := 0;
+  v_label TEXT; v_next_start DATE; v_next_end DATE;
+BEGIN
+  PERFORM public.assert_accounting_owner(p_center);
+  SELECT * INTO v_year FROM public.center_fiscal_years WHERE center_id = p_center AND status = 'open' LIMIT 1;
+  IF v_year.id IS NULL THEN
+    PERFORM public.ensure_open_fiscal_year(p_center);
+    SELECT * INTO v_year FROM public.center_fiscal_years WHERE center_id = p_center AND status = 'open' LIMIT 1;
+  END IF;
+  v_year.ends_on := COALESCE(v_year.ends_on, CURRENT_DATE);
+
+  SELECT COALESCE(SUM(amount), 0) INTO v_income FROM public.center_ledger
+   WHERE center_id = p_center AND kind = 'income' AND affects_profit IS NOT FALSE
+     AND occurred_on BETWEEN v_year.starts_on AND v_year.ends_on;
+  SELECT COALESCE(SUM(CASE WHEN entry_type = 'salary'
+    THEN GREATEST(0, COALESCE(gross_amount, amount) + COALESCE(bonus_amount, 0)
+      + COALESCE(commission_amount, 0) - COALESCE(deduction, 0))
+    ELSE amount END), 0) INTO v_expense
+  FROM public.center_ledger
+  WHERE center_id = p_center AND kind = 'expense' AND affects_profit IS NOT FALSE
+    AND occurred_on BETWEEN v_year.starts_on AND v_year.ends_on;
+
+  SELECT COALESCE(SUM(amount), 0) INTO v_cash_income FROM public.center_ledger
+   WHERE center_id = p_center AND kind = 'income'
+     AND occurred_on BETWEEN v_year.starts_on AND v_year.ends_on;
+  SELECT COALESCE(SUM(amount), 0) INTO v_cash_expense FROM public.center_ledger
+   WHERE center_id = p_center AND kind = 'expense'
+     AND occurred_on BETWEEN v_year.starts_on AND v_year.ends_on;
+  v_balance := v_year.opening_balance + v_cash_income - v_cash_expense;
+  SELECT COALESCE(SUM(amount), 0) INTO v_pending FROM public.dues
+   WHERE center_id = p_center AND status IN ('pending','partial')
+     AND make_date(due_year, month, 1) BETWEEN v_year.starts_on AND v_year.ends_on;
+
+  UPDATE public.center_fiscal_years SET status = 'closed', ends_on = v_year.ends_on,
+    closing_income = v_income, closing_expense = v_expense, closing_balance = v_balance,
+    closing_pending_dues = v_pending, closed_at = now() WHERE id = v_year.id;
+  v_next_start := v_year.ends_on + 1;
+  v_next_end := v_next_start + INTERVAL '1 year' - INTERVAL '1 day';
+  v_label := EXTRACT(YEAR FROM v_next_start)::INT::TEXT || '/' || EXTRACT(YEAR FROM v_next_end)::INT::TEXT;
+  INSERT INTO public.center_fiscal_years(center_id, fiscal_year, year_label, starts_on, ends_on, status, opening_balance, opening_pending_dues)
+  VALUES(p_center, EXTRACT(YEAR FROM v_next_start)::INT, v_label, v_next_start, v_next_end, 'open', v_balance, v_pending)
+  ON CONFLICT (center_id, year_label) DO NOTHING;
+  RETURN jsonb_build_object('closed', v_year.year_label, 'opened', v_label,
+    'carry_balance', v_balance, 'carry_pending', v_pending);
+END;
+$$;
+GRANT EXECUTE ON FUNCTION public.close_fiscal_year(UUID) TO authenticated;
 
 COMMIT;
