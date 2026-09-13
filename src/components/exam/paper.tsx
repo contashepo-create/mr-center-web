@@ -21,6 +21,7 @@ export function ExamPaper({
   questions,
   ornaments,
   centerName,
+  template = 'classic',
 }: {
   title: string;
   subject: string;
@@ -29,10 +30,11 @@ export function ExamPaper({
   questions: ExamQuestion[];
   ornaments?: ExamOrnaments | null;
   centerName?: string | null;
+  template?: 'classic' | 'modern' | 'formal';
 }) {
   const sections = paperSections(questions);
   return (
-    <div className="exam-paper" dir="rtl">
+    <div className={`exam-paper exam-paper-${template}`} dir="rtl">
       <PaperOrnaments ornaments={ornaments} />
       <div className="exam-paper-inner">
         <div className="exam-paper-head">

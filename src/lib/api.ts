@@ -593,7 +593,8 @@ export async function fetchStudentById(id: string): Promise<Student | null> {
   return (data as Student) ?? null;
 }
 
-export async function upsertStudent(centerId: string, s: Partial<Student> & { name: string }): Promise<void> {
+export async function upsertStudent(centerId: string, s: Partial<Student> & { name: string }): Promise<string> {
+  const studentId = s.id ?? uuid();
   const payload = {
     center_id: centerId,
     name: s.name.trim(),
@@ -610,9 +611,10 @@ export async function upsertStudent(centerId: string, s: Partial<Student> & { na
     if (error) throw error;
   } else {
     const { error } = await getSupabase().from('students')
-      .insert({ id: uuid(), created_at: nowIso(), ...payload });
+      .insert({ id: studentId, created_at: nowIso(), ...payload });
     if (error) throw error;
   }
+  return studentId;
 }
 
 export async function deleteStudent(id: string): Promise<void> {
@@ -1063,7 +1065,8 @@ export async function fetchExams(centerId: string): Promise<AppExam[]> {
 
 export async function upsertExam(centerId: string, exam: Partial<AppExam> & {
   title: string; questions: ExamQuestion[]; answers: ExamAnswer[];
-}): Promise<void> {
+}): Promise<string> {
+  const examId = exam.id || uuid();
   const marksSum = exam.questions.reduce((s, q) => s + (Number(q.marks) || 1), 0);
   const total = exam.questions.length > 0
     ? Number(exam.total_score || 0) || marksSum
@@ -1096,15 +1099,23 @@ export async function upsertExam(centerId: string, exam: Partial<AppExam> & {
     is_published: exam.is_published ?? false,
     attempts_allowed: exam.attempts_allowed ?? 1,
     show_result: exam.show_result ?? 'end',
+    delivery_mode: exam.delivery_mode ?? 'online',
+    online_mode: exam.online_mode ?? 'mixed',
+    target_group_ids: exam.target_group_ids ?? [],
+    availability_mode: exam.availability_mode ?? 'always',
+    available_from: exam.availability_mode === 'scheduled' ? exam.available_from ?? null : null,
+    available_until: exam.availability_mode === 'scheduled' ? exam.available_until ?? null : null,
+    paper_template: exam.paper_template ?? 'classic',
     ornaments: exam.ornaments ?? null,
   };
   if (exam.id) {
-    const { error } = await getSupabase().from('app_exams').update(payload).eq('id', exam.id);
+    const { error } = await getSupabase().from('app_exams').update(payload).eq('id', examId);
     if (error) throw error;
   } else {
-    const { error } = await getSupabase().from('app_exams').insert({ id: uuid(), ...payload });
+    const { error } = await getSupabase().from('app_exams').insert({ id: examId, ...payload });
     if (error) throw error;
   }
+  return examId;
 }
 
 export async function deleteExam(id: string): Promise<void> {

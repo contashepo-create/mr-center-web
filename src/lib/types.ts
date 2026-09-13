@@ -293,6 +293,10 @@ export type ExamAnswer = number | number[] | string | null;
 
 /** طريقة إظهار النتيجة للطالب */
 export type ExamResultMode = 'after_each' | 'end' | 'never';
+export type ExamDeliveryMode = 'paper' | 'online';
+export type OnlineExamMode = 'objective' | 'essay' | 'mixed';
+export type ExamAvailabilityMode = 'always' | 'scheduled';
+export type PaperTemplate = 'classic' | 'modern' | 'formal';
 
 /** كثافة الزخارف حول الورقة */
 export type OrnamentDensity = 'low' | 'medium' | 'high';
@@ -328,6 +332,14 @@ export interface AppExam {
   is_published: boolean;
   attempts_allowed: number;
   show_result: ExamResultMode;
+  /** مسار الاختبار وتحكم عرضه — تتوافق الاختبارات القديمة مع online/mixed تلقائياً. */
+  delivery_mode?: ExamDeliveryMode;
+  online_mode?: OnlineExamMode;
+  target_group_ids?: string[];
+  availability_mode?: ExamAvailabilityMode;
+  available_from?: string | null;
+  available_until?: string | null;
+  paper_template?: PaperTemplate;
   /** زخارف الورقة (اختياري — قد تكون غائبة في الاختبارات القديمة) */
   ornaments?: ExamOrnaments | null;
   created_at: string;
